@@ -4,12 +4,4 @@ pandas
 scikit-learn
 librosa
 soundfile
-matplotlibstreamlit>=1.41
-streamlit-webrtc
-av==14.2.0; python_version < "3.10"
-numpy
-pandas
-scikit-learn
-librosa
-soundfile
 matplotlib
