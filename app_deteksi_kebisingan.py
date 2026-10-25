@@ -1,4 +1,5 @@
 import hashlib
+import importlib.util
 import os
 import threading
 from collections import deque
@@ -470,7 +471,10 @@ with tab_uji:
                            f"RMS: {'berisik' if rms_hasil['berisik'] else 'tidak berisik'}.")
         return berisik_rf, override, rms_hasil
 
-    if sumber_audio == "Deteksi realtime":
+    if sumber_audio == "Deteksi realtime" and importlib.util.find_spec("streamlit_webrtc") is None:
+        st.error("Deteksi realtime belum tersedia di server ini karena paket streamlit-webrtc belum terpasang. "
+                 "Gunakan Unggah berkas atau Rekam langsung.")
+    elif sumber_audio == "Deteksi realtime":
         from streamlit_webrtc import webrtc_streamer
 
         st.caption("Tekan START dan izinkan mikrofon. Hasil diperbarui setiap detik dari 2 detik suara terakhir.")
