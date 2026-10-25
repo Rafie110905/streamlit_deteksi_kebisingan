@@ -1,4 +1,7 @@
+import hashlib
 import os
+import threading
+from collections import deque
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -57,6 +60,11 @@ def muat_audio(path):
 
 def ekstrak_fitur(path):
     y, sr = muat_audio(path)
+    return ekstrak_fitur_sinyal(y, sr)
+
+
+def ekstrak_fitur_sinyal(y, sr):
+    y = np.ascontiguousarray(y, dtype=np.float32)
     kw = dict(n_fft=FRAME_LEN, hop_length=HOP_LEN)
     d = {
         "rms": librosa.feature.rms(y=y, frame_length=FRAME_LEN, hop_length=HOP_LEN)[0],
@@ -72,6 +80,92 @@ def ekstrak_fitur(path):
         f[f"{nama}_median"] = float(np.median(v)); f[f"{nama}_max"] = float(np.max(v))
     f["rms_dbfs"] = float(20 * np.log10(np.sqrt(np.mean(y ** 2)) + 1e-12))
     return f, y, sr, d
+
+
+class PenyanggaAudioLangsung:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._reset_buffer()
+        self.hasil = None
+        self.error = None
+        self.nomor_hasil = 0
+        self.jumlah_frame = 0
+
+    def _reset_buffer(self):
+        self._potongan = deque()
+        self._jumlah_sampel = 0
+        self._sampel_sejak_prediksi = 0
+        self._sr = None
+
+    def reset(self):
+        with self._lock:
+            self._reset_buffer()
+            self.hasil = None
+            self.error = None
+            self.nomor_hasil = 0
+            self.jumlah_frame = 0
+
+    def proses_frame(self, frame, model, kolom):
+        try:
+            data = frame.to_ndarray()
+            if np.issubdtype(data.dtype, np.integer):
+                batas = max(abs(np.iinfo(data.dtype).min), np.iinfo(data.dtype).max)
+                data = data.astype(np.float32) / batas
+            else:
+                data = data.astype(np.float32, copy=False)
+            if data.ndim > 1:
+                data = data.mean(axis=0)
+            data = np.nan_to_num(data, copy=False)
+            sr = frame.sample_rate
+            if not sr or data.size == 0:
+                return
+
+            with self._lock:
+                if sr != self._sr:
+                    self._reset_buffer()
+                    self._sr = sr
+                self.jumlah_frame += 1
+                self._potongan.append(data.copy())
+                self._jumlah_sampel += data.size
+                self._sampel_sejak_prediksi += data.size
+
+                ukuran_jendela = int(sr * 2)
+                while self._jumlah_sampel > ukuran_jendela:
+                    lebih = self._jumlah_sampel - ukuran_jendela
+                    awal = self._potongan[0]
+                    if lebih >= awal.size:
+                        self._potongan.popleft()
+                        self._jumlah_sampel -= awal.size
+                    else:
+                        self._potongan[0] = awal[lebih:]
+                        self._jumlah_sampel -= lebih
+
+                if (self._jumlah_sampel < ukuran_jendela
+                        or self._sampel_sejak_prediksi < sr):
+                    return
+                y = np.concatenate(tuple(self._potongan))
+                self._sampel_sejak_prediksi = 0
+
+            f, _, _, _ = ekstrak_fitur_sinyal(y, sr)
+            x = pd.DataFrame([f])[kolom].values.astype(np.float32)
+            idx1 = list(model.classes_).index(1)
+            p = float(model.predict_proba(x)[0][idx1])
+            suara = np.array([pohon.predict_proba(x)[0][idx1] for pohon in model.estimators_])
+            hasil = {
+                "fitur": f, "p": p,
+                "n_berisik": int((suara >= .5).sum()), "n_pohon": len(suara),
+            }
+            with self._lock:
+                self.hasil = hasil
+                self.error = None
+                self.nomor_hasil += 1
+        except Exception as e:
+            with self._lock:
+                self.error = str(e)
+
+    def baca(self):
+        with self._lock:
+            return self.hasil, self.error, self.nomor_hasil, self.jumlah_frame
 
 
 def tingkat_keyakinan(p):
@@ -195,6 +289,10 @@ st.write("Unggah rekaman atau rekam suara langsung, lalu model akan menilai apak
 
 if "riwayat" not in st.session_state:
     st.session_state.riwayat = []
+if "hasil_audio" not in st.session_state:
+    st.session_state.hasil_audio = None
+if "audio_langsung" not in st.session_state:
+    st.session_state.audio_langsung = PenyanggaAudioLangsung()
 
 tab_uji, tab_riw = st.tabs(["🎙️ Uji Sampel", "🗂️ Riwayat"])
 
@@ -205,21 +303,80 @@ with tab_uji:
         help="Rekaman dengan RMS pada atau di atas ambang ini diputuskan BERISIK meskipun prediksi model berbeda.",
     )
     st.caption("dBFS adalah level digital rekaman, bukan pengukuran dB SPL; hasil dipengaruhi mikrofon, jarak, dan gain.")
-    sumber_audio = st.radio("Sumber audio", ["Unggah berkas", "Rekam langsung"], horizontal=True)
+    sumber_audio = st.radio(
+        "Sumber audio", ["Unggah berkas", "Rekam langsung", "Deteksi realtime"],
+        horizontal=True,
+    )
     if sumber_audio == "Unggah berkas":
         audio = st.file_uploader("Pilih berkas audio", type=["mp3", "wav", "m4a", "flac", "ogg"])
         nama_audio = audio.name if audio is not None else ""
-    else:
+    elif sumber_audio == "Rekam langsung":
         audio = st.audio_input("Rekam suara menggunakan mikrofon")
         nama_audio = "Rekaman langsung.wav" if audio is not None else ""
 
-    if audio is not None:
+    if sumber_audio == "Deteksi realtime":
+        from streamlit_webrtc import webrtc_streamer
+
+        st.caption("Tekan START dan izinkan mikrofon. Hasil diperbarui setiap detik dari 2 detik suara terakhir.")
+        st.session_state.hasil_audio = None
+        state_audio = st.session_state.audio_langsung
+
+        def callback_audio(frame):
+            state_audio.proses_frame(frame, model, kolom)
+            return frame
+
+        webrtc_ctx = webrtc_streamer(
+            key="deteksi-kebisingan-realtime",
+            audio_frame_callback=callback_audio,
+            media_stream_constraints={"audio": True, "video": False},
+            sendback_audio=False,
+        )
+
+        @st.fragment(run_every="1s")
+        def tampilkan_hasil_realtime():
+            hasil_live, error_live, nomor_hasil, jumlah_frame = state_audio.baca()
+            if not webrtc_ctx.state.playing:
+                st.info("Tekan START untuk mulai mendeteksi melalui mikrofon. Tekan STOP untuk mengakhiri.")
+                return
+            if error_live:
+                st.error(f"Gagal menganalisis audio langsung: {error_live}")
+            if hasil_live is None:
+                if jumlah_frame:
+                    st.info("Audio diterima. Menunggu 2 detik suara untuk prediksi pertama…")
+                else:
+                    st.warning("Belum menerima audio. Periksa izin mikrofon dan perangkat input di browser.")
+                return
+
+            fitur_live = hasil_live["fitur"]
+            p_live = hasil_live["p"]
+            berisik_live, override_live = tentukan_vonis(
+                p_live, fitur_live["rms_dbfs"], ambang_rms_dbfs
+            )
+            st.markdown(kartu_hasil(
+                "Deteksi realtime", p_live, hasil_live["n_berisik"], hasil_live["n_pohon"],
+                fitur_live, berisik_live, override_live, ambang_rms_dbfs,
+            ), unsafe_allow_html=True)
+            st.caption(
+                f"RMS: {fitur_live['rms_dbfs']:.1f} dBFS · "
+                f"P(berisik): {p_live:.3f} · Pembaruan ke-{nomor_hasil}"
+            )
+
+        tampilkan_hasil_realtime()
+        if not webrtc_ctx.state.playing:
+            state_audio.reset()
+
+    elif audio is not None:
         st.audio(audio)
-        if st.button("🌲 Jalankan hutan keputusan", type="primary"):
+        audio_bytes = audio.getvalue()
+        audio_id = hashlib.sha256(audio_bytes).hexdigest()
+        hasil = st.session_state.hasil_audio
+        audio_baru = hasil is None or hasil["audio_id"] != audio_id
+
+        if audio_baru:
             import tempfile
             sufiks = os.path.splitext(nama_audio)[1] or ".mp3"
             with tempfile.NamedTemporaryFile(delete=False, suffix=sufiks) as tmp:
-                tmp.write(audio.getvalue()); jalur = tmp.name
+                tmp.write(audio_bytes); jalur = tmp.name
             try:
                 with st.spinner("Mengekstrak fitur & memprediksi…"):
                     f, y, sr, d = ekstrak_fitur(jalur)
@@ -228,32 +385,61 @@ with tab_uji:
                     p = float(model.predict_proba(x)[0][idx1])
                     suara = np.array([t.predict_proba(x)[0][idx1] for t in model.estimators_])
                     n_b, n_p = int((suara >= .5).sum()), len(suara)
-                    berisik, override_rms = tentukan_vonis(p, f["rms_dbfs"], ambang_rms_dbfs)
-                st.markdown(kartu_hasil(
-                    nama_audio, p, n_b, n_p, f, berisik, override_rms, ambang_rms_dbfs
-                ), unsafe_allow_html=True)
-                st.write("")
-                fig = buat_dashboard(f, y, sr, d, p, berisik, n_b, n_p, kolom, imp, ref)
-                st.pyplot(fig)
-                plt.close(fig)
-                st.session_state.riwayat.append({
-                    "file": nama_audio, "vonis": "BERISIK" if berisik else "TIDAK BERISIK",
-                    "metode": "Ambang RMS" if override_rms else "Random Forest",
-                    "P model (berisik)": round(p, 3), "pohon_berisik": f"{n_b}/{n_p}",
-                    "keyakinan model": tingkat_keyakinan(p)})
+                hasil = {
+                    "audio_id": audio_id, "nama": nama_audio, "fitur": f, "y": y,
+                    "sr": sr, "detail": d, "p": p, "n_berisik": n_b, "n_pohon": n_p,
+                }
+                st.session_state.hasil_audio = hasil
             except Exception as e:
-                st.error(f"Gagal memproses audio: {e}")
+                hasil = {"audio_id": audio_id, "error": str(e)}
+                st.session_state.hasil_audio = hasil
             finally:
-                os.remove(jalur)
+                if os.path.exists(jalur):
+                    os.remove(jalur)
+
+        hasil = st.session_state.hasil_audio
+        if hasil and hasil["audio_id"] == audio_id and "error" not in hasil:
+            f, y, sr, d = hasil["fitur"], hasil["y"], hasil["sr"], hasil["detail"]
+            p, n_b, n_p = hasil["p"], hasil["n_berisik"], hasil["n_pohon"]
+            berisik, override_rms = tentukan_vonis(p, f["rms_dbfs"], ambang_rms_dbfs)
+            st.markdown(kartu_hasil(
+                nama_audio, p, n_b, n_p, f, berisik, override_rms, ambang_rms_dbfs
+            ), unsafe_allow_html=True)
+            st.write("")
+            fig = buat_dashboard(f, y, sr, d, p, berisik, n_b, n_p, kolom, imp, ref)
+            st.pyplot(fig)
+            plt.close(fig)
+
+            entri = {
+                "_audio_id": audio_id, "file": nama_audio,
+                "vonis": "BERISIK" if berisik else "TIDAK BERISIK",
+                "metode": "Ambang RMS" if override_rms else "Random Forest",
+                "P model (berisik)": round(p, 3), "pohon_berisik": f"{n_b}/{n_p}",
+                "keyakinan model": tingkat_keyakinan(p),
+            }
+            indeks = next(
+                (i for i, item in enumerate(st.session_state.riwayat)
+                 if item.get("_audio_id") == audio_id),
+                None,
+            )
+            if indeks is None and audio_baru:
+                st.session_state.riwayat.append(entri)
+            elif indeks is not None:
+                st.session_state.riwayat[indeks] = entri
+        elif hasil and hasil["audio_id"] == audio_id:
+            st.error(f"Gagal memproses audio: {hasil['error']}")
     else:
+        st.session_state.hasil_audio = None
+        st.session_state.audio_langsung.reset()
         if sumber_audio == "Unggah berkas":
-            st.info("Unggah rekaman (mp3 / wav / m4a / flac / ogg) untuk memulai.")
-        else:
-            st.info("Izinkan akses mikrofon di browser, lalu mulai merekam untuk memulai.")
+            st.info("Unggah rekaman (mp3 / wav / m4a / flac / ogg) untuk analisis otomatis.")
+        elif sumber_audio == "Rekam langsung":
+            st.info("Izinkan akses mikrofon di browser, lalu selesaikan rekaman untuk analisis otomatis.")
 
 with tab_riw:
     if st.session_state.riwayat:
-        st.dataframe(pd.DataFrame(st.session_state.riwayat), use_container_width=True)
+        riwayat = pd.DataFrame(st.session_state.riwayat).drop(columns=["_audio_id"], errors="ignore")
+        st.dataframe(riwayat, use_container_width=True)
         if st.button("Hapus riwayat"):
             st.session_state.riwayat = []; st.rerun()
     else:
