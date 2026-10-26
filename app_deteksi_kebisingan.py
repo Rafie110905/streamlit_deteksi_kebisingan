@@ -391,24 +391,32 @@ def konfigurasi_rtc():
 
 
 # ------------------------------------------------------------------ Peringatan suara
+MIME_AUDIO = {".wav": "audio/wav", ".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".m4a": "audio/mp4"}
+
+
 @st.cache_data
 def muat_peringatan():
-    jalur = os.path.join(os.path.dirname(os.path.abspath(__file__)), "peringatan_jangan_berisik.wav")
-    if not os.path.exists(jalur):
-        return None
-    with open(jalur, "rb") as fh:
-        return fh.read()
+    """Cari berkas peringatan_jangan_berisik.(wav|mp3|ogg|m4a) di folder aplikasi."""
+    folder = os.path.dirname(os.path.abspath(__file__))
+    for ekstensi, mime in MIME_AUDIO.items():
+        jalur = os.path.join(folder, "peringatan_jangan_berisik" + ekstensi)
+        if os.path.exists(jalur):
+            with open(jalur, "rb") as fh:
+                return fh.read(), mime
+    return None
 
 
 def putar_peringatan():
-    data = muat_peringatan()
-    if data is None:
-        st.caption("Berkas suara peringatan (peringatan_jangan_berisik.wav) tidak ditemukan.")
+    suara = st.session_state.get("suara_kustom") or muat_peringatan()
+    if suara is None:
+        st.caption("Berkas suara peringatan tidak ditemukan. Letakkan peringatan_jangan_berisik.wav "
+                   "(atau .mp3 / .ogg / .m4a) di folder aplikasi, atau unggah suara sendiri.")
         return
+    data, mime = suara
     try:
-        st.audio(data, format="audio/wav", autoplay=True)
+        st.audio(data, format=mime, autoplay=True)
     except TypeError:          # Streamlit lama tanpa parameter autoplay
-        st.audio(data, format="audio/wav")
+        st.audio(data, format=mime)
 
 
 # ------------------------------------------------------------------ UI
@@ -476,6 +484,19 @@ with tab_uji:
         "Bunyikan peringatan suara bila terdeteksi berisik", value=True,
         help="Memutar suara \"Mohon jangan berisik\". Pada mode Bandingkan keduanya, suara dibunyikan bila kedua metode menyatakan berisik.")
     jeda_peringatan = 10
+    if pakai_peringatan:
+        with st.expander("Ganti suara peringatan"):
+            suara_unggah = st.file_uploader("Unggah suara peringatan sendiri", type=["wav", "mp3", "ogg", "m4a"],
+                                            key="unggah_suara_peringatan")
+            if suara_unggah is not None:
+                mime_unggah = MIME_AUDIO.get(os.path.splitext(suara_unggah.name)[1].lower(), "audio/wav")
+                st.session_state["suara_kustom"] = (suara_unggah.getvalue(), mime_unggah)
+                st.audio(suara_unggah.getvalue(), format=mime_unggah)
+                st.caption("Dipakai selama sesi ini. Untuk permanen, simpan sebagai peringatan_jangan_berisik "
+                           "(.wav / .mp3 / .ogg / .m4a) di folder aplikasi pada repositori.")
+            else:
+                st.session_state.pop("suara_kustom", None)
+                st.caption("Memakai suara bawaan (peringatan_jangan_berisik).")
     if pakai_peringatan and sumber_audio == "Deteksi realtime":
         jeda_peringatan = st.slider("Jeda antar peringatan (detik)", 5, 60, 10, 5)
         st.caption("Suara peringatan bisa tertangkap mikrofon dan ikut dihitung sebagai kebisingan. "
