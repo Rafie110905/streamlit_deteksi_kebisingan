@@ -13,6 +13,7 @@ Aplikasi daring: https://psd-deteksi-kebisingan.streamlit.app
 - Random Forest berisi 300 pohon, dengan keluaran probabilitas dan jumlah pohon yang memilih berisik.
 - Metode RMS (aturan) dengan ambang yang dapat diatur.
 - Grafik gelombang, spektrogram, serta perbandingan nilai audio terhadap ambang.
+- Peringatan suara "Mohon jangan berisik" yang diputar otomatis saat terdeteksi berisik (dapat dimatikan).
 - Riwayat pengujian selama sesi aplikasi masih berjalan.
 
 ## Struktur berkas
@@ -24,9 +25,12 @@ Aplikasi daring: https://psd-deteksi-kebisingan.streamlit.app
 ├── app_deteksi_kebisingan.py
 ├── fitur_audio_kebisingan.csv
 ├── packages.txt
+├── peringatan_jangan_berisik.wav
 ├── requirements.txt
 └── README.md
 ```
+
+`peringatan_jangan_berisik.wav` adalah suara peringatan yang diputar saat hasil berisik. Berkas ini harus berada di folder yang sama dengan `app_deteksi_kebisingan.py`.
 
 `fitur_audio_kebisingan.csv` berisi fitur dan label data latih. Model dilatih ulang setiap kali aplikasi dimulai dari data fitur tersebut. Audio yang diunggah atau direkam tidak disimpan dan tidak dipakai untuk melatih model.
 
@@ -79,6 +83,16 @@ url = "turn:alamat-server:3478"
 username = "nama-pengguna"
 credential = "kata-sandi"
 ```
+
+## Peringatan suara
+
+Kotak centang **Bunyikan peringatan suara bila terdeteksi berisik** (aktif secara bawaan) memutar suara "Mohon jangan berisik" saat hasilnya berisik.
+
+- **Unggah berkas dan rekam langsung:** suara diputar sekali setiap audio baru dianalisis dan hasilnya berisik.
+- **Deteksi realtime:** suara diputar saat hasil berisik, lalu diulang bila masih berisik setelah jeda yang diatur (5 sampai 60 detik, bawaan 10 detik).
+- **Metode yang menentukan:** pada Random Forest atau RMS, suara mengikuti metode yang dipilih. Pada Bandingkan keduanya, suara dibunyikan bila kedua metode menyatakan berisik.
+- Browser dapat menahan pemutaran otomatis sebelum pengguna berinteraksi dengan halaman. Bila suara tidak keluar, tekan tombol putar pada pemutar kecil yang muncul. Pada iPhone/Safari, pemutaran otomatis lebih ketat.
+- Pada mode realtime, suara peringatan dapat tertangkap mikrofon dan ikut dihitung sebagai kebisingan. Gunakan headphone atau kecilkan volume.
 
 ## Cara membaca hasil
 
