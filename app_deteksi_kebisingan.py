@@ -2,6 +2,7 @@ import hashlib
 import importlib.util
 import os
 import threading
+import time
 from collections import deque
 import numpy as np
 import pandas as pd
@@ -389,6 +390,27 @@ def konfigurasi_rtc():
     return {"iceServers": servers}
 
 
+# ------------------------------------------------------------------ Peringatan suara
+@st.cache_data
+def muat_peringatan():
+    jalur = os.path.join(os.path.dirname(os.path.abspath(__file__)), "peringatan_jangan_berisik.wav")
+    if not os.path.exists(jalur):
+        return None
+    with open(jalur, "rb") as fh:
+        return fh.read()
+
+
+def putar_peringatan():
+    data = muat_peringatan()
+    if data is None:
+        st.caption("Berkas suara peringatan (peringatan_jangan_berisik.wav) tidak ditemukan.")
+        return
+    try:
+        st.audio(data, format="audio/wav", autoplay=True)
+    except TypeError:          # Streamlit lama tanpa parameter autoplay
+        st.audio(data, format="audio/wav")
+
+
 # ------------------------------------------------------------------ UI
 model, kolom, imp, ref, akurasi_cv, n_data = siapkan_model()
 
@@ -410,7 +432,7 @@ st.title("Deteksi Kebisingan Ruangan")
 st.write("Unggah rekaman, rekam langsung, atau deteksi realtime. Metode yang tersedia: Random Forest, "
          "RMS (aturan), atau keduanya sekaligus untuk dibandingkan.")
 
-for kunci, nilai in [("riwayat", []), ("hasil_audio", None)]:
+for kunci, nilai in [("riwayat", []), ("hasil_audio", None), ("alarm_terakhir", 0.0), ("alarm_sampai", 0.0)]:
     if kunci not in st.session_state:
         st.session_state[kunci] = nilai
 if "audio_langsung" not in st.session_state:
@@ -449,6 +471,22 @@ with tab_uji:
     elif sumber_audio == "Rekam langsung":
         audio = st.audio_input("Rekam suara menggunakan mikrofon")
         nama_audio = "Rekaman langsung.wav" if audio is not None else ""
+
+    pakai_peringatan = st.checkbox(
+        "Bunyikan peringatan suara bila terdeteksi berisik", value=True,
+        help="Memutar suara \"Mohon jangan berisik\". Pada mode Bandingkan keduanya, suara dibunyikan bila kedua metode menyatakan berisik.")
+    jeda_peringatan = 10
+    if pakai_peringatan and sumber_audio == "Deteksi realtime":
+        jeda_peringatan = st.slider("Jeda antar peringatan (detik)", 5, 60, 10, 5)
+        st.caption("Suara peringatan bisa tertangkap mikrofon dan ikut dihitung sebagai kebisingan. "
+                   "Gunakan headphone atau kecilkan volume.")
+
+    def vonis_peringatan(berisik_rf, rms_hasil):
+        if metode == M_RF:
+            return berisik_rf
+        if metode == M_RMS:
+            return rms_hasil["berisik"]
+        return berisik_rf and rms_hasil["berisik"]
 
     def tampilkan_kartu(nama, p, n_b, n_p, f, d, sr, durasi):
         """Kartu hasil sesuai metode terpilih. Mengembalikan (vonis_rf, override, rms_hasil)."""
@@ -510,14 +548,24 @@ with tab_uji:
                     st.warning("Koneksi terbuka tetapi belum ada audio masuk. Periksa izin mikrofon, "
                                "perangkat input di browser, atau jaringan (butuh STUN/TURN).")
                 return
-            tampilkan_kartu("Deteksi realtime", hasil_live["p"], hasil_live["n_berisik"], hasil_live["n_pohon"],
-                            hasil_live["fitur"], hasil_live["detail"], hasil_live["sr"], hasil_live["durasi"])
+            berisik_rf_l, _, rms_l = tampilkan_kartu(
+                "Deteksi realtime", hasil_live["p"], hasil_live["n_berisik"], hasil_live["n_pohon"],
+                hasil_live["fitur"], hasil_live["detail"], hasil_live["sr"], hasil_live["durasi"])
+            if pakai_peringatan and vonis_peringatan(berisik_rf_l, rms_l):
+                sekarang = time.time()
+                if sekarang - st.session_state.alarm_terakhir >= jeda_peringatan:
+                    st.session_state.alarm_terakhir = sekarang
+                    st.session_state.alarm_sampai = sekarang + 4      # elemen audio tampil 4 detik agar suara selesai
+            if pakai_peringatan and time.time() < st.session_state.alarm_sampai:
+                putar_peringatan()
             st.caption(f"Level: {hasil_live['fitur']['rms_dbfs']:.1f} dBFS · P(RF): {hasil_live['p']:.3f} · "
                        f"Pembaruan ke-{nomor_hasil} · frame diterima: {jumlah_frame}")
 
         tampilkan_hasil_realtime()
         if not webrtc_ctx.state.playing:
             state_audio.reset()
+            st.session_state.alarm_terakhir = 0.0
+            st.session_state.alarm_sampai = 0.0
 
     elif audio is not None:
         st.audio(audio)
@@ -554,6 +602,8 @@ with tab_uji:
             f, y, sr, d = hasil["fitur"], hasil["y"], hasil["sr"], hasil["detail"]
             p, n_b, n_p, durasi = hasil["p"], hasil["n_berisik"], hasil["n_pohon"], hasil["durasi"]
             berisik_rf, override, rms_hasil = tampilkan_kartu(nama_audio, p, n_b, n_p, f, d, sr, durasi)
+            if pakai_peringatan and audio_baru and vonis_peringatan(berisik_rf, rms_hasil):
+                putar_peringatan()
             st.write("")
 
             if metode == M_RF:
