@@ -15,7 +15,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import StratifiedGroupKFold, cross_val_predict
 from sklearn.metrics import accuracy_score
 
-st.set_page_config(page_title="Deteksi Kebisingan — Random Forest", page_icon="🌲", layout="wide")
+st.set_page_config(page_title="Deteksi Kebisingan Ruangan", layout="wide")
 
 FRAME_LEN, HOP_LEN, SEED = 2048, 512, 42
 FITUR_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fitur_audio_kebisingan.csv")
@@ -147,14 +147,17 @@ class PenyanggaAudioLangsung:
                 self._sampel_sejak_prediksi = 0
 
             f, _, _, _ = ekstrak_fitur_sinyal(y, sr)
-            x = pd.DataFrame([f])[kolom].values.astype(np.float32)
-            idx1 = list(model.classes_).index(1)
-            p = float(model.predict_proba(x)[0][idx1])
-            suara = np.array([pohon.predict_proba(x)[0][idx1] for pohon in model.estimators_])
-            hasil = {
-                "fitur": f, "p": p,
-                "n_berisik": int((suara >= .5).sum()), "n_pohon": len(suara),
-            }
+            hasil = {"fitur": f}
+            if model is not None and kolom is not None:
+                x = pd.DataFrame([f])[kolom].values.astype(np.float32)
+                idx1 = list(model.classes_).index(1)
+                p = float(model.predict_proba(x)[0][idx1])
+                suara = np.array([pohon.predict_proba(x)[0][idx1] for pohon in model.estimators_])
+                hasil.update({
+                    "p": p,
+                    "n_berisik": int((suara >= .5).sum()),
+                    "n_pohon": len(suara),
+                })
             with self._lock:
                 self.hasil = hasil
                 self.error = None
@@ -173,21 +176,18 @@ def tingkat_keyakinan(p):
     return "SANGAT YAKIN" if j >= .35 else "YAKIN" if j >= .20 else "CENDERUNG" if j >= .10 else "RAGU-RAGU"
 
 
-def tentukan_vonis(p, rms_dbfs, ambang_rms_dbfs):
-    override_rms = p < 0.5 and rms_dbfs >= ambang_rms_dbfs
-    return p >= 0.5 or override_rms, override_rms
+def tentukan_vonis_random_forest(p):
+    return p >= 0.5
 
 
-def kartu_hasil(nama, p, n_berisik, n_pohon, f, berisik, override_rms, ambang_rms_dbfs):
+def tentukan_vonis_rms(rms_dbfs, ambang_rms_dbfs):
+    return rms_dbfs >= ambang_rms_dbfs
+
+
+def kartu_hasil_random_forest(nama, p, n_berisik, n_pohon, f, berisik):
     ragu = abs(p - .5) < .10
     warna = WARNA["ragu"] if ragu else WARNA["berisik"] if berisik else WARNA["tenang"]
-    teks, ikon = ("BERISIK", "🚨") if berisik else ("TIDAK BERISIK", "🌿")
-    pesan_override = (
-        f'<div style="font-size:12px;color:{WARNA["berisik"]};margin-top:6px">'
-        f"Diputuskan BERISIK karena RMS ≥ {ambang_rms_dbfs:.1f} dBFS "
-        f"(P model = {p:.3f})</div>"
-        if override_rms else ""
-    )
+    teks = "BERISIK" if berisik else "TIDAK BERISIK"
     kotak = lambda k, v, s="": (f"<div style='background:{WARNA['panel']};padding:8px 10px;border-radius:8px'>"
                                  f"<div style='color:{WARNA['redup']};font-size:10px'>{k}</div><b>{v}</b>"
                                  f"<div style='color:{WARNA['redup']};font-size:10px'>{s}</div></div>")
@@ -196,9 +196,9 @@ def kartu_hasil(nama, p, n_berisik, n_pohon, f, berisik, override_rms, ambang_rm
                 border-left:8px solid {warna};border:1px solid #334155;border-left:8px solid {warna};font-family:'Segoe UI',Arial,sans-serif">
       <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px">
         <div>
-          <div style="font-size:11px;letter-spacing:2px;color:{WARNA['redup']}">🌲 HASIL DETEKSI · {nama}</div>
-          <div style="font-size:32px;font-weight:800;color:{warna};margin-top:4px">{ikon} {teks}</div>
-          <div style="font-size:13px;color:{WARNA['redup']}">Keyakinan model: <b style="color:{WARNA['teks']}">{tingkat_keyakinan(p)}</b></div>{pesan_override}
+          <div style="font-size:11px;letter-spacing:2px;color:{WARNA['redup']}">RANDOM FOREST · {nama}</div>
+          <div style="font-size:32px;font-weight:800;color:{warna};margin-top:4px">{teks}</div>
+          <div style="font-size:13px;color:{WARNA['redup']}">Keyakinan model: <b style="color:{WARNA['teks']}">{tingkat_keyakinan(p)}</b></div>
         </div>
         <div style="text-align:right">
           <div style="font-size:11px;color:{WARNA['redup']}">SUARA POHON (MODEL)</div>
@@ -208,7 +208,7 @@ def kartu_hasil(nama, p, n_berisik, n_pohon, f, berisik, override_rms, ambang_rm
       </div>
       <div style="margin-top:16px">
         <div style="display:flex;justify-content:space-between;font-size:11px;color:{WARNA['redup']}">
-          <span>🌿 Tenang</span><span>P(berisik) = <b style="color:{WARNA['teks']}">{p:.3f}</b></span><span>Berisik 🚨</span></div>
+          <span>Tenang</span><span>P(berisik) = <b style="color:{WARNA['teks']}">{p:.3f}</b></span><span>Berisik</span></div>
         <div style="position:relative;height:14px;border-radius:7px;margin-top:5px;
              background:linear-gradient(90deg,{WARNA['tenang']} 0%,{WARNA['tenang']} 40%,{WARNA['ragu']} 40%,{WARNA['ragu']} 60%,{WARNA['berisik']} 60%,{WARNA['berisik']} 100%)">
           <div style="position:absolute;left:{p*100:.1f}%;top:-5px;width:4px;height:24px;background:#fff;border-radius:2px;transform:translateX(-2px)"></div>
@@ -225,6 +225,23 @@ def kartu_hasil(nama, p, n_berisik, n_pohon, f, berisik, override_rms, ambang_rm
     </div>"""
 
 
+def kartu_hasil_rms(nama, f, berisik, ambang_rms_dbfs):
+    warna = WARNA["berisik"] if berisik else WARNA["tenang"]
+    teks = "BERISIK" if berisik else "TIDAK BERISIK"
+    return f"""
+    <div style="background:{WARNA['gelap']};color:{WARNA['teks']};padding:20px 24px;border-radius:14px;
+                border:1px solid #334155;border-left:8px solid {warna};font-family:'Segoe UI',Arial,sans-serif">
+      <div style="font-size:11px;letter-spacing:2px;color:{WARNA['redup']}">METODE RMS · {nama}</div>
+      <div style="font-size:32px;font-weight:800;color:{warna};margin-top:4px">{teks}</div>
+      <div style="margin-top:10px;font-size:14px">
+        RMS: <b>{f['rms_dbfs']:.1f} dBFS</b> · Ambang: <b>{ambang_rms_dbfs:.1f} dBFS</b>
+      </div>
+      <div style="font-size:12px;color:{WARNA['redup']};margin-top:4px">
+        {f['rms_dbfs']:.1f} dBFS {'≥' if berisik else '<'} {ambang_rms_dbfs:.1f} dBFS
+      </div>
+    </div>"""
+
+
 def buat_dashboard(f, y, sr, d, p, berisik, n_berisik, n_pohon, kolom, imp, ref):
     top = list(imp.head(8).index)
     warna = WARNA["ragu"] if abs(p - .5) < .10 else WARNA["berisik"] if berisik else WARNA["tenang"]
@@ -237,7 +254,7 @@ def buat_dashboard(f, y, sr, d, p, berisik, n_berisik, n_pohon, kolom, imp, ref)
         for sp in ax.spines.values(): sp.set_color("#334155")
         ax.grid(color="#334155", alpha=.5, lw=.6)
 
-    ax1 = fig.add_subplot(gs[0, 0]); gaya(ax1, f"① Voting {n_pohon} pohon")
+    ax1 = fig.add_subplot(gs[0, 0]); gaya(ax1, f"Voting {n_pohon} pohon")
     jml = [n_pohon - n_berisik, n_berisik]
     bars = ax1.bar(["Tidak Berisik", "Berisik"], jml, color=[WARNA["tenang"], WARNA["berisik"]], width=.55)
     for b, j in zip(bars, jml):
@@ -246,7 +263,7 @@ def buat_dashboard(f, y, sr, d, p, berisik, n_berisik, n_pohon, kolom, imp, ref)
     ax1.axhline(n_pohon / 2, color="white", ls="--", lw=1, alpha=.7)
     ax1.set_ylim(0, n_pohon * 1.12); ax1.tick_params(axis="x", labelcolor=WARNA["teks"], labelsize=10)
 
-    ax2 = fig.add_subplot(gs[0, 1]); gaya(ax2, "② Profil fitur penting (z-score vs dataset)")
+    ax2 = fig.add_subplot(gs[0, 1]); gaya(ax2, "Profil fitur penting (z-score vs dataset)")
     z_s = ((pd.Series(f)[top] - ref["mu"][top]) / ref["sd"][top]).values
     z_b = ((ref["mu_b"][top] - ref["mu"][top]) / ref["sd"][top]).values
     z_t = ((ref["mu_t"][top] - ref["mu"][top]) / ref["sd"][top]).values
@@ -259,12 +276,12 @@ def buat_dashboard(f, y, sr, d, p, berisik, n_berisik, n_pohon, kolom, imp, ref)
     ax2.legend(facecolor=WARNA["panel"], labelcolor=WARNA["teks"], fontsize=7.5, loc="lower right")
 
     t = librosa.times_like(d["rms"], sr=sr, hop_length=HOP_LEN)
-    ax3 = fig.add_subplot(gs[1, 0]); gaya(ax3, "③ Gelombang & amplop RMS")
+    ax3 = fig.add_subplot(gs[1, 0]); gaya(ax3, "Gelombang & amplop RMS")
     ax3.plot(np.arange(len(y)) / sr, y, lw=.4, color="#64748b")
     ax3.plot(t, d["rms"], color=warna, lw=1.8); ax3.plot(t, -d["rms"], color=warna, lw=1.8)
     ax3.set_xlabel("Waktu (detik)", color=WARNA["redup"], fontsize=9)
 
-    ax4 = fig.add_subplot(gs[1, 1]); gaya(ax4, "④ Spektrogram & Spectral Centroid")
+    ax4 = fig.add_subplot(gs[1, 1]); gaya(ax4, "Spektrogram & Spectral Centroid")
     S = librosa.amplitude_to_db(np.abs(librosa.stft(y, n_fft=FRAME_LEN, hop_length=HOP_LEN)), ref=np.max)
     librosa.display.specshow(S, sr=sr, hop_length=HOP_LEN, x_axis="time", y_axis="linear", cmap="viridis", ax=ax4)
     ax4.plot(t, d["centroid"], color="white", lw=1.4); ax4.set_ylim(0, min(sr / 2, 12000))
@@ -273,19 +290,33 @@ def buat_dashboard(f, y, sr, d, p, berisik, n_berisik, n_pohon, kolom, imp, ref)
 
 
 # ------------------------------------------------------------------ UI
-model, kolom, imp, ref, akurasi_cv, n_data = siapkan_model()
+st.title("Deteksi Kebisingan Ruangan")
+st.write("Pilih metode deteksi, lalu unggah rekaman atau gunakan mikrofon.")
+metode_deteksi = st.radio(
+    "Metode deteksi",
+    ["Random Forest", "RMS"],
+    horizontal=True,
+    key="metode_deteksi",
+)
+
+if metode_deteksi == "Random Forest":
+    model, kolom, imp, ref, akurasi_cv, n_data = siapkan_model()
+else:
+    model, kolom, imp, ref = None, None, None, None
 
 with st.sidebar:
-    st.header("🌲 Tentang Model")
-    st.metric("Akurasi validasi silang", f"{akurasi_cv * 100:.1f}%")
-    st.caption(f"Random Forest · 300 pohon · {len(kolom)} fitur · {n_data} data latih. "
-               "Validasi 5-fold dikelompokkan per mahasiswa.")
-    st.markdown("**Fitur terpenting**")
-    st.bar_chart(imp.head(8)[::-1])
-    st.caption("Hasil bersifat indikatif. Rekaman yang sangat berbeda dari data latih bisa salah diklasifikasi.")
-
-st.title("🌲 Deteksi Kebisingan Ruangan — Random Forest")
-st.write("Unggah rekaman atau rekam suara langsung, lalu model akan menilai apakah ruangan **berisik** atau **tidak berisik**.")
+    if metode_deteksi == "Random Forest":
+        st.header("Tentang Model")
+        st.metric("Akurasi validasi silang", f"{akurasi_cv * 100:.1f}%")
+        st.caption(f"Random Forest · 300 pohon · {len(kolom)} fitur · {n_data} data latih. "
+                   "Validasi 5-fold dikelompokkan per mahasiswa.")
+        st.markdown("**Fitur terpenting**")
+        st.bar_chart(imp.head(8)[::-1])
+        st.caption("Hasil bersifat indikatif. Rekaman yang sangat berbeda dari data latih bisa salah diklasifikasi.")
+    else:
+        st.header("Tentang RMS")
+        st.write("Metode ini membandingkan level RMS rekaman dengan ambang yang dipilih.")
+        st.caption("RMS mengukur level digital audio (dBFS), bukan tingkat tekanan suara akustik (dB SPL).")
 
 if "riwayat" not in st.session_state:
     st.session_state.riwayat = []
@@ -293,16 +324,26 @@ if "hasil_audio" not in st.session_state:
     st.session_state.hasil_audio = None
 if "audio_langsung" not in st.session_state:
     st.session_state.audio_langsung = PenyanggaAudioLangsung()
+if "metode_deteksi_aktif" not in st.session_state:
+    st.session_state.metode_deteksi_aktif = metode_deteksi
+elif st.session_state.metode_deteksi_aktif != metode_deteksi:
+    st.session_state.audio_langsung.reset()
+    st.session_state.hasil_audio = None
+    st.session_state.metode_deteksi_aktif = metode_deteksi
 
-tab_uji, tab_riw = st.tabs(["🎙️ Uji Sampel", "🗂️ Riwayat"])
+tab_uji, tab_riw = st.tabs(["Uji Sampel", "Riwayat"])
 
 with tab_uji:
     ambang_rms_dbfs = st.slider(
         "Ambang suara keras (RMS, dBFS)",
         min_value=-40.0, max_value=-10.0, value=-30.0, step=0.5,
-        help="Rekaman dengan RMS pada atau di atas ambang ini diputuskan BERISIK meskipun prediksi model berbeda.",
+        help="Pada mode RMS, rekaman dengan level RMS pada atau di atas ambang diputuskan BERISIK.",
     )
     st.caption("dBFS adalah level digital rekaman, bukan pengukuran dB SPL; hasil dipengaruhi mikrofon, jarak, dan gain.")
+    if metode_deteksi == "RMS":
+        st.info("Mode RMS menilai audio hanya dari ambang RMS; Random Forest tidak digunakan.")
+    else:
+        st.info("Mode Random Forest menggunakan model saja; ambang RMS tidak memengaruhi vonis.")
     sumber_audio = st.radio(
         "Sumber audio", ["Unggah berkas", "Rekam langsung", "Deteksi realtime"],
         horizontal=True,
@@ -322,11 +363,14 @@ with tab_uji:
         state_audio = st.session_state.audio_langsung
 
         def callback_audio(frame):
-            state_audio.proses_frame(frame, model, kolom)
+            if metode_deteksi == "Random Forest":
+                state_audio.proses_frame(frame, model, kolom)
+            else:
+                state_audio.proses_frame(frame, None, None)
             return frame
 
         webrtc_ctx = webrtc_streamer(
-            key="deteksi-kebisingan-realtime",
+            key=f"deteksi-kebisingan-realtime-{metode_deteksi}",
             audio_frame_callback=callback_audio,
             media_stream_constraints={"audio": True, "video": False},
             sendback_audio=False,
@@ -348,18 +392,23 @@ with tab_uji:
                 return
 
             fitur_live = hasil_live["fitur"]
-            p_live = hasil_live["p"]
-            berisik_live, override_live = tentukan_vonis(
-                p_live, fitur_live["rms_dbfs"], ambang_rms_dbfs
-            )
-            st.markdown(kartu_hasil(
-                "Deteksi realtime", p_live, hasil_live["n_berisik"], hasil_live["n_pohon"],
-                fitur_live, berisik_live, override_live, ambang_rms_dbfs,
-            ), unsafe_allow_html=True)
-            st.caption(
-                f"RMS: {fitur_live['rms_dbfs']:.1f} dBFS · "
-                f"P(berisik): {p_live:.3f} · Pembaruan ke-{nomor_hasil}"
-            )
+            if metode_deteksi == "Random Forest":
+                p_live = hasil_live["p"]
+                berisik_live = tentukan_vonis_random_forest(p_live)
+                st.markdown(kartu_hasil_random_forest(
+                    "Deteksi realtime", p_live, hasil_live["n_berisik"],
+                    hasil_live["n_pohon"], fitur_live, berisik_live,
+                ), unsafe_allow_html=True)
+                st.caption(
+                    f"RMS: {fitur_live['rms_dbfs']:.1f} dBFS · "
+                    f"P(berisik): {p_live:.3f} · Pembaruan ke-{nomor_hasil}"
+                )
+            else:
+                berisik_live = tentukan_vonis_rms(fitur_live["rms_dbfs"], ambang_rms_dbfs)
+                st.markdown(kartu_hasil_rms(
+                    "Deteksi realtime", fitur_live, berisik_live, ambang_rms_dbfs
+                ), unsafe_allow_html=True)
+                st.caption(f"Pembaruan ke-{nomor_hasil} · RMS tidak menggunakan model Random Forest.")
 
         tampilkan_hasil_realtime()
         if not webrtc_ctx.state.playing:
@@ -378,16 +427,11 @@ with tab_uji:
             with tempfile.NamedTemporaryFile(delete=False, suffix=sufiks) as tmp:
                 tmp.write(audio_bytes); jalur = tmp.name
             try:
-                with st.spinner("Mengekstrak fitur & memprediksi…"):
+                with st.spinner("Mengekstrak fitur audio…"):
                     f, y, sr, d = ekstrak_fitur(jalur)
-                    x = pd.DataFrame([f])[kolom].values.astype(np.float32)
-                    idx1 = list(model.classes_).index(1)
-                    p = float(model.predict_proba(x)[0][idx1])
-                    suara = np.array([t.predict_proba(x)[0][idx1] for t in model.estimators_])
-                    n_b, n_p = int((suara >= .5).sum()), len(suara)
                 hasil = {
                     "audio_id": audio_id, "nama": nama_audio, "fitur": f, "y": y,
-                    "sr": sr, "detail": d, "p": p, "n_berisik": n_b, "n_pohon": n_p,
+                    "sr": sr, "detail": d,
                 }
                 st.session_state.hasil_audio = hasil
             except Exception as e:
@@ -400,26 +444,61 @@ with tab_uji:
         hasil = st.session_state.hasil_audio
         if hasil and hasil["audio_id"] == audio_id and "error" not in hasil:
             f, y, sr, d = hasil["fitur"], hasil["y"], hasil["sr"], hasil["detail"]
-            p, n_b, n_p = hasil["p"], hasil["n_berisik"], hasil["n_pohon"]
-            berisik, override_rms = tentukan_vonis(p, f["rms_dbfs"], ambang_rms_dbfs)
-            st.markdown(kartu_hasil(
-                nama_audio, p, n_b, n_p, f, berisik, override_rms, ambang_rms_dbfs
-            ), unsafe_allow_html=True)
-            st.write("")
-            fig = buat_dashboard(f, y, sr, d, p, berisik, n_b, n_p, kolom, imp, ref)
-            st.pyplot(fig)
-            plt.close(fig)
-
-            entri = {
-                "_audio_id": audio_id, "file": nama_audio,
-                "vonis": "BERISIK" if berisik else "TIDAK BERISIK",
-                "metode": "Ambang RMS" if override_rms else "Random Forest",
-                "P model (berisik)": round(p, 3), "pohon_berisik": f"{n_b}/{n_p}",
-                "keyakinan model": tingkat_keyakinan(p),
-            }
+            if metode_deteksi == "Random Forest":
+                if "p" not in hasil:
+                    x = pd.DataFrame([f])[kolom].values.astype(np.float32)
+                    idx1 = list(model.classes_).index(1)
+                    p = float(model.predict_proba(x)[0][idx1])
+                    suara = np.array([t.predict_proba(x)[0][idx1] for t in model.estimators_])
+                    hasil.update({
+                        "p": p,
+                        "n_berisik": int((suara >= .5).sum()),
+                        "n_pohon": len(suara),
+                    })
+                p, n_b, n_p = hasil["p"], hasil["n_berisik"], hasil["n_pohon"]
+                berisik = tentukan_vonis_random_forest(p)
+                st.markdown(kartu_hasil_random_forest(
+                    nama_audio, p, n_b, n_p, f, berisik
+                ), unsafe_allow_html=True)
+                st.write("")
+                fig = buat_dashboard(f, y, sr, d, p, berisik, n_b, n_p, kolom, imp, ref)
+                st.pyplot(fig)
+                plt.close(fig)
+                entri = {
+                    "_audio_id": f"{audio_id}:Random Forest", "file": nama_audio,
+                    "metode": "Random Forest",
+                    "vonis": "BERISIK" if berisik else "TIDAK BERISIK",
+                    "P model (berisik)": round(p, 3), "pohon_berisik": f"{n_b}/{n_p}",
+                    "keyakinan model": tingkat_keyakinan(p),
+                }
+            else:
+                berisik = tentukan_vonis_rms(f["rms_dbfs"], ambang_rms_dbfs)
+                st.markdown(kartu_hasil_rms(
+                    nama_audio, f, berisik, ambang_rms_dbfs
+                ), unsafe_allow_html=True)
+                t = librosa.times_like(d["rms"], sr=sr, hop_length=HOP_LEN)
+                fig, ax = plt.subplots(figsize=(12, 3), facecolor=WARNA["gelap"])
+                ax.set_facecolor(WARNA["panel"])
+                ax.plot(np.arange(len(y)) / sr, y, lw=.5, color="#64748b", label="Gelombang audio")
+                ax.plot(t, d["rms"], lw=1.8, color=WARNA["berisik"], label="RMS")
+                ax.plot(t, -d["rms"], lw=1.8, color=WARNA["berisik"])
+                ax.set_title("Gelombang audio dan amplop RMS", color=WARNA["teks"], loc="left")
+                ax.set_xlabel("Waktu (detik)", color=WARNA["redup"])
+                ax.tick_params(colors=WARNA["redup"])
+                ax.legend(facecolor=WARNA["panel"], labelcolor=WARNA["teks"])
+                fig.tight_layout()
+                st.pyplot(fig)
+                plt.close(fig)
+                entri = {
+                    "_audio_id": f"{audio_id}:RMS", "file": nama_audio,
+                    "metode": "RMS",
+                    "vonis": "BERISIK" if berisik else "TIDAK BERISIK",
+                    "RMS (dBFS)": round(f["rms_dbfs"], 1),
+                    "ambang (dBFS)": ambang_rms_dbfs,
+                }
             indeks = next(
                 (i for i, item in enumerate(st.session_state.riwayat)
-                 if item.get("_audio_id") == audio_id),
+                 if item.get("_audio_id") == entri["_audio_id"]),
                 None,
             )
             if indeks is None and audio_baru:
