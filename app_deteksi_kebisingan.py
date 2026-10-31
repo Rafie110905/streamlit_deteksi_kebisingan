@@ -1,8 +1,6 @@
-import io
 import hashlib
 import os
 import threading
-import wave
 from collections import deque
 import numpy as np
 import pandas as pd
@@ -25,29 +23,10 @@ WARNA = {"berisik": "#f43f5e", "tenang": "#10b981", "ragu": "#f59e0b",
          "gelap": "#0f172a", "panel": "#1e293b", "teks": "#e2e8f0", "redup": "#94a3b8"}
 
 
-def buat_audio_peringatan():
-    sample_rate = 22050
-    potongan = []
-    for frekuensi, durasi in ((880, 0.18), (0, 0.10), (1046, 0.24)):
-        jumlah = int(sample_rate * durasi)
-        if frekuensi == 0:
-            potongan.append(np.zeros(jumlah, dtype=np.float32))
-            continue
-        waktu = np.arange(jumlah) / sample_rate
-        amplop = np.minimum(waktu / 0.015, 1) * np.minimum((durasi - waktu) / 0.02, 1)
-        potongan.append(0.35 * np.sin(2 * np.pi * frekuensi * waktu) * amplop)
-
-    pcm = (np.concatenate(potongan) * 32767).astype("<i2")
-    buffer = io.BytesIO()
-    with wave.open(buffer, "wb") as file_audio:
-        file_audio.setnchannels(1)
-        file_audio.setsampwidth(2)
-        file_audio.setframerate(sample_rate)
-        file_audio.writeframes(pcm.tobytes())
-    return buffer.getvalue()
-
-
-PERINGATAN_AUDIO = buat_audio_peringatan()
+PERINGATAN_AUDIO = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "peringatan_jangan_berisik.mpeg",
+)
 
 
 # ------------------------------------------------------------------ model
@@ -218,7 +197,7 @@ def putar_peringatan_rekaman(audio_id, metode, berisik):
     kunci_peringatan = (audio_id, metode)
     if kunci_peringatan not in peringatan_diputar:
         st.warning("Peringatan: hasil deteksi BERISIK.")
-        st.audio(PERINGATAN_AUDIO, format="audio/wav", autoplay=True)
+        st.audio(PERINGATAN_AUDIO, format="audio/mpeg", autoplay=True)
         peringatan_diputar.add(kunci_peringatan)
 
 
@@ -454,7 +433,7 @@ with tab_uji:
 
             if berisik_live and not st.session_state.peringatan_realtime_aktif:
                 st.warning("Peringatan: hasil deteksi realtime BERISIK.")
-                st.audio(PERINGATAN_AUDIO, format="audio/wav", autoplay=True)
+                st.audio(PERINGATAN_AUDIO, format="audio/mpeg", autoplay=True)
                 st.session_state.peringatan_realtime_aktif = True
             elif not berisik_live:
                 st.session_state.peringatan_realtime_aktif = False
