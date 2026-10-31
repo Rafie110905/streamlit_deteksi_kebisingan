@@ -334,13 +334,13 @@ elif st.session_state.metode_deteksi_aktif != metode_deteksi:
 tab_uji, tab_riw = st.tabs(["Uji Sampel", "Riwayat"])
 
 with tab_uji:
-    ambang_rms_dbfs = st.slider(
-        "Ambang suara keras (RMS, dBFS)",
-        min_value=-40.0, max_value=-10.0, value=-30.0, step=0.5,
-        help="Pada mode RMS, rekaman dengan level RMS pada atau di atas ambang diputuskan BERISIK.",
-    )
-    st.caption("dBFS adalah level digital rekaman, bukan pengukuran dB SPL; hasil dipengaruhi mikrofon, jarak, dan gain.")
     if metode_deteksi == "RMS":
+        ambang_rms_dbfs = st.slider(
+            "Ambang suara keras (RMS, dBFS)",
+            min_value=-40.0, max_value=-10.0, value=-30.0, step=0.5,
+            help="Rekaman dengan level RMS pada atau di atas ambang diputuskan BERISIK.",
+        )
+        st.caption("dBFS adalah level digital rekaman, bukan pengukuran dB SPL; hasil dipengaruhi mikrofon, jarak, dan gain.")
         st.info("Mode RMS menilai audio hanya dari ambang RMS; Random Forest tidak digunakan.")
     else:
         st.info("Mode Random Forest menggunakan model saja; ambang RMS tidak memengaruhi vonis.")
