@@ -1,0 +1,7 @@
+services:
+  deteksi-kebisingan:
+    build: .
+    image: deteksi-kebisingan:latest
+    ports:
+      - "8011:8501"
+    restart: unless-stopped
