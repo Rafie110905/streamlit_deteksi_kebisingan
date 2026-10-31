@@ -1,6 +1,8 @@
+import io
 import hashlib
 import os
 import threading
+import wave
 from collections import deque
 import numpy as np
 import pandas as pd
@@ -21,6 +23,31 @@ FRAME_LEN, HOP_LEN, SEED = 2048, 512, 42
 FITUR_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fitur_audio_kebisingan.csv")
 WARNA = {"berisik": "#f43f5e", "tenang": "#10b981", "ragu": "#f59e0b",
          "gelap": "#0f172a", "panel": "#1e293b", "teks": "#e2e8f0", "redup": "#94a3b8"}
+
+
+def buat_audio_peringatan():
+    sample_rate = 22050
+    potongan = []
+    for frekuensi, durasi in ((880, 0.18), (0, 0.10), (1046, 0.24)):
+        jumlah = int(sample_rate * durasi)
+        if frekuensi == 0:
+            potongan.append(np.zeros(jumlah, dtype=np.float32))
+            continue
+        waktu = np.arange(jumlah) / sample_rate
+        amplop = np.minimum(waktu / 0.015, 1) * np.minimum((durasi - waktu) / 0.02, 1)
+        potongan.append(0.35 * np.sin(2 * np.pi * frekuensi * waktu) * amplop)
+
+    pcm = (np.concatenate(potongan) * 32767).astype("<i2")
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as file_audio:
+        file_audio.setnchannels(1)
+        file_audio.setsampwidth(2)
+        file_audio.setframerate(sample_rate)
+        file_audio.writeframes(pcm.tobytes())
+    return buffer.getvalue()
+
+
+PERINGATAN_AUDIO = buat_audio_peringatan()
 
 
 # ------------------------------------------------------------------ model
@@ -184,6 +211,17 @@ def tentukan_vonis_rms(rms_dbfs, ambang_rms_dbfs):
     return rms_dbfs >= ambang_rms_dbfs
 
 
+def putar_peringatan_rekaman(audio_id, metode, berisik):
+    if not berisik:
+        return
+    peringatan_diputar = st.session_state.setdefault("peringatan_rekaman_diputar", set())
+    kunci_peringatan = (audio_id, metode)
+    if kunci_peringatan not in peringatan_diputar:
+        st.warning("Peringatan: hasil deteksi BERISIK.")
+        st.audio(PERINGATAN_AUDIO, format="audio/wav", autoplay=True)
+        peringatan_diputar.add(kunci_peringatan)
+
+
 def kartu_hasil_random_forest(nama, p, n_berisik, n_pohon, f, berisik):
     ragu = abs(p - .5) < .10
     warna = WARNA["ragu"] if ragu else WARNA["berisik"] if berisik else WARNA["tenang"]
@@ -324,11 +362,14 @@ if "hasil_audio" not in st.session_state:
     st.session_state.hasil_audio = None
 if "audio_langsung" not in st.session_state:
     st.session_state.audio_langsung = PenyanggaAudioLangsung()
+if "peringatan_realtime_aktif" not in st.session_state:
+    st.session_state.peringatan_realtime_aktif = False
 if "metode_deteksi_aktif" not in st.session_state:
     st.session_state.metode_deteksi_aktif = metode_deteksi
 elif st.session_state.metode_deteksi_aktif != metode_deteksi:
     st.session_state.audio_langsung.reset()
     st.session_state.hasil_audio = None
+    st.session_state.peringatan_realtime_aktif = False
     st.session_state.metode_deteksi_aktif = metode_deteksi
 
 tab_uji, tab_riw = st.tabs(["Uji Sampel", "Riwayat"])
@@ -380,6 +421,7 @@ with tab_uji:
         def tampilkan_hasil_realtime():
             hasil_live, error_live, nomor_hasil, jumlah_frame = state_audio.baca()
             if not webrtc_ctx.state.playing:
+                st.session_state.peringatan_realtime_aktif = False
                 st.info("Tekan START untuk mulai mendeteksi melalui mikrofon. Tekan STOP untuk mengakhiri.")
                 return
             if error_live:
@@ -410,9 +452,17 @@ with tab_uji:
                 ), unsafe_allow_html=True)
                 st.caption(f"Pembaruan ke-{nomor_hasil} · RMS tidak menggunakan model Random Forest.")
 
+            if berisik_live and not st.session_state.peringatan_realtime_aktif:
+                st.warning("Peringatan: hasil deteksi realtime BERISIK.")
+                st.audio(PERINGATAN_AUDIO, format="audio/wav", autoplay=True)
+                st.session_state.peringatan_realtime_aktif = True
+            elif not berisik_live:
+                st.session_state.peringatan_realtime_aktif = False
+
         tampilkan_hasil_realtime()
         if not webrtc_ctx.state.playing:
             state_audio.reset()
+            st.session_state.peringatan_realtime_aktif = False
 
     elif audio is not None:
         st.audio(audio)
@@ -460,6 +510,8 @@ with tab_uji:
                 st.markdown(kartu_hasil_random_forest(
                     nama_audio, p, n_b, n_p, f, berisik
                 ), unsafe_allow_html=True)
+                if sumber_audio == "Rekam langsung":
+                    putar_peringatan_rekaman(audio_id, metode_deteksi, berisik)
                 st.write("")
                 fig = buat_dashboard(f, y, sr, d, p, berisik, n_b, n_p, kolom, imp, ref)
                 st.pyplot(fig)
@@ -476,6 +528,8 @@ with tab_uji:
                 st.markdown(kartu_hasil_rms(
                     nama_audio, f, berisik, ambang_rms_dbfs
                 ), unsafe_allow_html=True)
+                if sumber_audio == "Rekam langsung":
+                    putar_peringatan_rekaman(audio_id, metode_deteksi, berisik)
                 t = librosa.times_like(d["rms"], sr=sr, hop_length=HOP_LEN)
                 fig, ax = plt.subplots(figsize=(12, 3), facecolor=WARNA["gelap"])
                 ax.set_facecolor(WARNA["panel"])
