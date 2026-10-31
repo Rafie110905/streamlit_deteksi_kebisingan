@@ -2,6 +2,7 @@ services:
   deteksi-kebisingan:
     build: .
     image: deteksi-kebisingan:latest
+    container_name: deteksi-kebisingan-app
     ports:
       - "8011:8501"
     restart: unless-stopped

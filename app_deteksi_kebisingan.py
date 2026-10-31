@@ -23,10 +23,16 @@ WARNA = {"berisik": "#f43f5e", "tenang": "#10b981", "ragu": "#f59e0b",
          "gelap": "#0f172a", "panel": "#1e293b", "teks": "#e2e8f0", "redup": "#94a3b8"}
 
 
-PERINGATAN_AUDIO = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    "peringatan_jangan_berisik.mpeg",
-)
+def _cari_audio_peringatan():
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    for nama in ("peringatan_jangan_berisik.mp3", "peringatan_jangan_berisik.mpeg", "peringatan_jangan_berisik.wav"):
+        jalur = os.path.join(base_dir, nama)
+        if os.path.exists(jalur):
+            return jalur
+    return os.path.join(base_dir, "peringatan_jangan_berisik.mp3")
+
+
+PERINGATAN_AUDIO = _cari_audio_peringatan()
 
 
 # ------------------------------------------------------------------ model
