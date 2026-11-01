@@ -23,16 +23,24 @@ WARNA = {"berisik": "#f43f5e", "tenang": "#10b981", "ragu": "#f59e0b",
          "gelap": "#0f172a", "panel": "#1e293b", "teks": "#e2e8f0", "redup": "#94a3b8"}
 
 
-def _cari_audio_peringatan():
+def cari_audio_peringatan():
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    for nama in ("peringatan_jangan_berisik.mp3", "peringatan_jangan_berisik.mpeg", "peringatan_jangan_berisik.wav"):
-        jalur = os.path.join(base_dir, nama)
-        if os.path.exists(jalur):
-            return jalur
-    return os.path.join(base_dir, "peringatan_jangan_berisik.mp3")
+    format_audio = {
+        ".mp3": "audio/mpeg",
+        ".mpeg": "audio/mpeg",
+        ".wav": "audio/wav",
+    }
+    for ekstensi, format_mime in format_audio.items():
+        jalur = os.path.join(base_dir, f"peringatan_jangan_berisik{ekstensi}")
+        if os.path.isfile(jalur):
+            return jalur, format_mime
+    raise FileNotFoundError(
+        "File peringatan tidak ditemukan. Sediakan peringatan_jangan_berisik.mp3, "
+        "peringatan_jangan_berisik.mpeg, atau peringatan_jangan_berisik.wav."
+    )
 
 
-PERINGATAN_AUDIO = _cari_audio_peringatan()
+PERINGATAN_AUDIO, FORMAT_AUDIO_PERINGATAN = cari_audio_peringatan()
 
 
 # ------------------------------------------------------------------ model
@@ -203,7 +211,7 @@ def putar_peringatan_rekaman(audio_id, metode, berisik):
     kunci_peringatan = (audio_id, metode)
     if kunci_peringatan not in peringatan_diputar:
         st.warning("Peringatan: hasil deteksi BERISIK.")
-        st.audio(PERINGATAN_AUDIO, format="audio/mpeg", autoplay=True)
+        st.audio(PERINGATAN_AUDIO, format=FORMAT_AUDIO_PERINGATAN, autoplay=True)
         peringatan_diputar.add(kunci_peringatan)
 
 
@@ -439,7 +447,7 @@ with tab_uji:
 
             if berisik_live and not st.session_state.peringatan_realtime_aktif:
                 st.warning("Peringatan: hasil deteksi realtime BERISIK.")
-                st.audio(PERINGATAN_AUDIO, format="audio/mpeg", autoplay=True)
+                st.audio(PERINGATAN_AUDIO, format=FORMAT_AUDIO_PERINGATAN, autoplay=True)
                 st.session_state.peringatan_realtime_aktif = True
             elif not berisik_live:
                 st.session_state.peringatan_realtime_aktif = False
