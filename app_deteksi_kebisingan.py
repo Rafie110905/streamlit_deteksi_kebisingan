@@ -1,11 +1,14 @@
+import base64
 import hashlib
 import os
+import time
 import tempfile
 import threading
 from collections import deque
 import numpy as np
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 import librosa
 import librosa.display
 import soundfile as sf
@@ -51,11 +54,56 @@ def muat_bytes_peringatan():
 PERINGATAN_BYTES, FORMAT_AUDIO_PERINGATAN = muat_bytes_peringatan()
 
 
-def bunyikan_peringatan():
-    """Render audio autoplay. Dipanggil di SETIAP rerun selama hasilnya BERISIK,
-    supaya elemen tidak dihapus Streamlit di rerun berikutnya.
-    Elemen yang identik tidak diputar ulang, jadi suara tetap diputar sampai selesai."""
-    st.audio(PERINGATAN_BYTES, format=FORMAT_AUDIO_PERINGATAN, autoplay=True)
+def siapkan_alarm_browser():
+    """Buat objek Audio SEKALI di halaman utama browser (window.parent) dan simpan di
+    window.parent.__alarm. Dipanggil di setiap rerun, tapi kontennya identik sehingga
+    iframe tidak dimuat ulang."""
+    b64 = base64.b64encode(PERINGATAN_BYTES).decode()
+    components.html(f"""<script>
+    (function() {{
+      var p = window.parent;
+      if (!p.__alarm) {{
+        p.__alarm = new p.Audio("data:{FORMAT_AUDIO_PERINGATAN};base64,{b64}");
+        p.__alarm.preload = "auto";
+      }}
+    }})();
+    </script>""", height=0)
+
+
+def bunyikan_peringatan(token, ulang=False):
+    """Putar alarm lewat objek Audio di browser.
+    ulang=False: putar sekali per token (token sama tidak diputar lagi).
+    ulang=True : putar lagi kalau alarm sudah selesai (dipakai selama masih berisik)."""
+    components.html(f"""<script>
+    (function() {{
+      var p = window.parent, token = "{token}", ulang = {str(ulang).lower()}, tries = 0;
+      function coba() {{
+        var a = p.__alarm;
+        if (!a) {{ if (tries++ < 30) setTimeout(coba, 100); return; }}
+        if (ulang) {{
+          if (!a.paused && !a.ended) return;
+        }} else {{
+          if (p.__alarmToken === token) return;
+          p.__alarmToken = token;
+        }}
+        a.currentTime = 0;
+        var pr = a.play();
+        if (pr && pr.catch) pr.catch(function() {{
+          if (p.__alarmMenunggu) return;
+          p.__alarmMenunggu = true;
+          var f = function() {{
+            p.__alarmMenunggu = false;
+            p.document.removeEventListener("click", f);
+            p.document.removeEventListener("keydown", f);
+            a.play();
+          }};
+          p.document.addEventListener("click", f);
+          p.document.addEventListener("keydown", f);
+        }});
+      }}
+      coba();
+    }})();
+    </script>""", height=0)
 
 
 # ------------------------------------------------------------------ model
@@ -219,11 +267,11 @@ def tentukan_vonis_rms(rms_dbfs, ambang_rms_dbfs):
     return rms_dbfs >= ambang_rms_dbfs
 
 
-def putar_peringatan_rekaman(berisik):
+def putar_peringatan_rekaman(audio_id, metode, berisik):
     if not berisik:
         return
     st.warning("Peringatan: hasil deteksi BERISIK.")
-    bunyikan_peringatan()
+    bunyikan_peringatan(token=f"{audio_id}:{metode}", ulang=False)
 
 
 def kartu_hasil_random_forest(nama, p, n_berisik, n_pohon, f, berisik):
@@ -341,12 +389,16 @@ metode_deteksi = st.radio(
     key="metode_deteksi",
 )
 
+siapkan_alarm_browser()
+
 if metode_deteksi == "Random Forest":
     model, kolom, imp, ref, akurasi_cv, n_data = siapkan_model()
 else:
     model, kolom, imp, ref = None, None, None, None
 
 with st.sidebar:
+    if st.button("🔊 Tes alarm"):
+        bunyikan_peringatan(token=time.time(), ulang=False)
     if metode_deteksi == "Random Forest":
         st.header("Tentang Model")
         st.metric("Akurasi validasi silang", f"{akurasi_cv * 100:.1f}%")
@@ -459,7 +511,7 @@ with tab_uji:
             # sehingga suara terpotong / tidak terdengar.
             if berisik_live:
                 st.warning("Peringatan: hasil deteksi realtime BERISIK.")
-                bunyikan_peringatan()
+                bunyikan_peringatan(token=nomor_hasil, ulang=True)
 
         tampilkan_hasil_realtime()
         if not webrtc_ctx.state.playing:
@@ -511,7 +563,7 @@ with tab_uji:
                     nama_audio, p, n_b, n_p, f, berisik
                 ), unsafe_allow_html=True)
                 if sumber_audio == "Rekam langsung":
-                    putar_peringatan_rekaman(berisik)
+                    putar_peringatan_rekaman(audio_id, metode_deteksi, berisik)
                 st.write("")
                 fig = buat_dashboard(f, y, sr, d, p, berisik, n_b, n_p, kolom, imp, ref)
                 st.pyplot(fig)
@@ -529,7 +581,7 @@ with tab_uji:
                     nama_audio, f, berisik, ambang_rms_dbfs
                 ), unsafe_allow_html=True)
                 if sumber_audio == "Rekam langsung":
-                    putar_peringatan_rekaman(berisik)
+                    putar_peringatan_rekaman(audio_id, metode_deteksi, berisik)
                 t = librosa.times_like(d["rms"], sr=sr, hop_length=HOP_LEN)
                 fig, ax = plt.subplots(figsize=(12, 3), facecolor=WARNA["gelap"])
                 ax.set_facecolor(WARNA["panel"])
