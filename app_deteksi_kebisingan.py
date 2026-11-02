@@ -19,8 +19,8 @@ st.set_page_config(page_title="Deteksi Kebisingan Ruangan", layout="wide")
 
 FRAME_LEN, HOP_LEN, SEED = 2048, 512, 42
 FITUR_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fitur_audio_kebisingan.csv")
-WARNA = {"berisik": "#f43f5e", "tenang": "#10b981", "ragu": "#f59e0b",
-         "gelap": "#0f172a", "panel": "#1e293b", "teks": "#e2e8f0", "redup": "#94a3b8"}
+WARNA = {"berisik": "#ef4444", "tenang": "#10b981", "ragu": "#f59e0b",
+         "gelap": "#090909", "panel": "#171717", "teks": "#f5f5f5", "redup": "#a3a3a3"}
 
 
 def cari_audio_peringatan():
