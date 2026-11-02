@@ -204,14 +204,22 @@ def tentukan_vonis_rms(rms_dbfs, ambang_rms_dbfs):
     return rms_dbfs >= ambang_rms_dbfs
 
 
-def putar_peringatan_rekaman(audio_id, metode, berisik):
+def tampilkan_peringatan_sampel(audio_id, metode, berisik):
     if not berisik:
         return
     peringatan_diputar = st.session_state.setdefault("peringatan_rekaman_diputar", set())
     kunci_peringatan = (audio_id, metode)
-    if kunci_peringatan not in peringatan_diputar:
-        st.warning("Peringatan: hasil deteksi BERISIK.")
-        st.audio(PERINGATAN_AUDIO, format=FORMAT_AUDIO_PERINGATAN, autoplay=True)
+    peringatan_baru = kunci_peringatan not in peringatan_diputar
+    st.warning(
+        "Peringatan: hasil deteksi BERISIK. "
+        "Jika suara tidak terdengar, tekan tombol putar pada pemutar di bawah."
+    )
+    st.audio(
+        PERINGATAN_AUDIO,
+        format=FORMAT_AUDIO_PERINGATAN,
+        autoplay=peringatan_baru,
+    )
+    if peringatan_baru:
         peringatan_diputar.add(kunci_peringatan)
 
 
@@ -511,8 +519,7 @@ with tab_uji:
                 st.markdown(kartu_hasil_random_forest(
                     nama_audio, p, n_b, n_p, f, berisik
                 ), unsafe_allow_html=True)
-                if sumber_audio == "Rekam langsung":
-                    putar_peringatan_rekaman(audio_id, metode_deteksi, berisik)
+                tampilkan_peringatan_sampel(audio_id, metode_deteksi, berisik)
                 st.write("")
                 fig = buat_dashboard(f, y, sr, d, p, berisik, n_b, n_p, kolom, imp, ref)
                 st.pyplot(fig)
@@ -529,8 +536,7 @@ with tab_uji:
                 st.markdown(kartu_hasil_rms(
                     nama_audio, f, berisik, ambang_rms_dbfs
                 ), unsafe_allow_html=True)
-                if sumber_audio == "Rekam langsung":
-                    putar_peringatan_rekaman(audio_id, metode_deteksi, berisik)
+                tampilkan_peringatan_sampel(audio_id, metode_deteksi, berisik)
                 t = librosa.times_like(d["rms"], sr=sr, hop_length=HOP_LEN)
                 fig, ax = plt.subplots(figsize=(12, 3), facecolor=WARNA["gelap"])
                 ax.set_facecolor(WARNA["panel"])
