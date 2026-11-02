@@ -209,7 +209,10 @@ def tampilkan_peringatan_sampel(audio_id, metode, berisik):
         return
     peringatan_diputar = st.session_state.setdefault("peringatan_rekaman_diputar", set())
     kunci_peringatan = (audio_id, metode)
-    peringatan_baru = kunci_peringatan not in peringatan_diputar
+    autoplay = (
+        st.session_state.get("autoplay_peringatan", False)
+        and kunci_peringatan not in peringatan_diputar
+    )
     st.warning(
         "Peringatan: hasil deteksi BERISIK. "
         "Jika suara tidak terdengar, tekan tombol putar pada pemutar di bawah."
@@ -217,9 +220,9 @@ def tampilkan_peringatan_sampel(audio_id, metode, berisik):
     st.audio(
         PERINGATAN_AUDIO,
         format=FORMAT_AUDIO_PERINGATAN,
-        autoplay=peringatan_baru,
+        autoplay=autoplay,
     )
-    if peringatan_baru:
+    if autoplay:
         peringatan_diputar.add(kunci_peringatan)
 
 
@@ -344,6 +347,20 @@ else:
     model, kolom, imp, ref = None, None, None, None
 
 with st.sidebar:
+    st.subheader("Suara peringatan")
+    st.caption("Aktifkan sekali dan coba suara. Browser mungkin tetap meminta klik putar.")
+    if st.button(
+        "Aktifkan autoplay",
+        disabled=st.session_state.get("autoplay_peringatan", False),
+        key="aktifkan_autoplay_peringatan",
+    ):
+        st.session_state.autoplay_peringatan = True
+        st.session_state.uji_autoplay_peringatan = True
+    if st.session_state.get("autoplay_peringatan", False):
+        st.success("Autoplay peringatan aktif; kebijakan browser tetap dapat membatasinya.")
+    if st.session_state.pop("uji_autoplay_peringatan", False):
+        st.audio(PERINGATAN_AUDIO, format=FORMAT_AUDIO_PERINGATAN, autoplay=True)
+
     if metode_deteksi == "Random Forest":
         st.header("Tentang Model")
         st.metric("Akurasi validasi silang", f"{akurasi_cv * 100:.1f}%")
@@ -423,6 +440,7 @@ with tab_uji:
             hasil_live, error_live, nomor_hasil, jumlah_frame = state_audio.baca()
             if not webrtc_ctx.state.playing:
                 st.session_state.peringatan_realtime_aktif = False
+                st.session_state.peringatan_realtime_autoplay_diputar = False
                 st.info("Tekan START untuk mulai mendeteksi melalui mikrofon. Tekan STOP untuk mengakhiri.")
                 return
             if error_live:
@@ -454,7 +472,10 @@ with tab_uji:
                 st.caption(f"Pembaruan ke-{nomor_hasil} · RMS tidak menggunakan model Random Forest.")
 
             if berisik_live:
-                peringatan_baru = not st.session_state.peringatan_realtime_aktif
+                autoplay = (
+                    st.session_state.get("autoplay_peringatan", False)
+                    and not st.session_state.get("peringatan_realtime_autoplay_diputar", False)
+                )
                 st.warning(
                     "Peringatan: hasil deteksi realtime BERISIK. "
                     "Jika suara tidak terdengar, tekan tombol putar pada pemutar di bawah."
@@ -462,11 +483,14 @@ with tab_uji:
                 st.audio(
                     PERINGATAN_AUDIO,
                     format=FORMAT_AUDIO_PERINGATAN,
-                    autoplay=peringatan_baru,
+                    autoplay=autoplay,
                 )
+                if autoplay:
+                    st.session_state.peringatan_realtime_autoplay_diputar = True
                 st.session_state.peringatan_realtime_aktif = True
             elif not berisik_live:
                 st.session_state.peringatan_realtime_aktif = False
+                st.session_state.peringatan_realtime_autoplay_diputar = False
 
         tampilkan_hasil_realtime()
         if not webrtc_ctx.state.playing:
