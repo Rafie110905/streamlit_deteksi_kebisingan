@@ -13,6 +13,7 @@ import io
 import asyncio
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 from fastapi import (
     FastAPI, Request, Depends, HTTPException, status,
@@ -38,21 +39,46 @@ ADMIN_PASS = os.getenv("ADMIN_PASS", "admin123")
 
 # ── Inisialisasi Aplikasi & Keamanan ──────────────────────────────────────────
 app = FastAPI(title="Admin Panel Deteksi Kebisingan", docs_url=None, redoc_url=None)
-security = HTTPBasic()
+security = HTTPBasic(auto_error=False)
 
 inisialisasi_db()
 
 
-def verifikasi_admin(credentials: HTTPBasicCredentials = Depends(security)):
-    ok_user = secrets.compare_digest(credentials.username.encode(), ADMIN_USER.encode())
-    ok_pass = secrets.compare_digest(credentials.password.encode(), ADMIN_PASS.encode())
-    if not (ok_user and ok_pass):
+def verifikasi_admin(
+    request: Request,
+    credentials: Optional[HTTPBasicCredentials] = Depends(security),
+):
+    # Cek 1: Token dari parameter URL atau Cookie
+    token = request.query_params.get("token") or request.cookies.get("admin_token")
+    if token and secrets.compare_digest(token.encode("utf-8"), ADMIN_PASS.encode("utf-8")):
+        return ADMIN_USER
+
+    # Cek 2: Kredensial HTTP Basic
+    if credentials:
+        ok_user = secrets.compare_digest(credentials.username.encode("utf-8"), ADMIN_USER.encode("utf-8"))
+        ok_pass = secrets.compare_digest(credentials.password.encode("utf-8"), ADMIN_PASS.encode("utf-8"))
+        if ok_user and ok_pass:
+            return credentials.username
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Kredensial salah atau token tidak valid",
+        headers={"WWW-Authenticate": "Basic"},
+    )
+
+
+@app.get("/embed", response_class=HTMLResponse)
+def dashboard_embed(request: Request, token: str = Query("")):
+    """Tampilan embed dashboard admin dengan otentikasi token untuk Streamlit."""
+    if not (token and secrets.compare_digest(token.encode("utf-8"), ADMIN_PASS.encode("utf-8"))):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Kredensial salah",
+            detail="Token otentikasi salah atau tidak ada",
             headers={"WWW-Authenticate": "Basic"},
         )
-    return credentials.username
+    resp = HTMLResponse(content=DASHBOARD_HTML)
+    resp.set_cookie(key="admin_token", value=ADMIN_PASS, httponly=True, samesite="lax")
+    return resp
 
 
 # ── REST API Endpoints ────────────────────────────────────────────────────────
@@ -555,7 +581,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
           <div class="filter-group">
             <input type="text" class="input-control" id="f-query" placeholder="🔍 Cari nama file / sesi..." oninput="debounceRiwayat()">
-            <a href="/api/ekspor/csv" class="btn-action">📥 Unduh CSV</a>
+            <a href="/api/ekspor/csv" id="btn-csv-export" class="btn-action">📥 Unduh CSV</a>
           </div>
         </div>
 
@@ -847,6 +873,15 @@ function initChartSumber(labels, berisik, tenang) {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
+const urlParams = new URLSearchParams(window.location.search);
+const adminToken = urlParams.get('token') || '';
+
+function apiUrl(endpoint) {
+  if (!adminToken) return endpoint;
+  const sep = endpoint.includes('?') ? '&' : '?';
+  return `${endpoint}${sep}token=${encodeURIComponent(adminToken)}`;
+}
+
 function setText(id, text) { const el = document.getElementById(id); if (el) el.textContent = text; }
 function fmt(val, dec=1) { return (val === null || val === undefined) ? '—' : parseFloat(val).toFixed(dec); }
 
@@ -925,7 +960,7 @@ function applyLivePayload(d) {
 // ── Fetch Grafik ───────────────────────────────────────────────────────────
 async function muatGrafik() {
   try {
-    const res = await fetch('/api/grafik?menit=10');
+    const res = await fetch(apiUrl('/api/grafik?menit=10'));
     if (!res.ok) return;
     const d = await res.json();
     const rows = d.data || [];
@@ -946,7 +981,7 @@ async function muatGrafik() {
 // ── Tab 2: Analisis ────────────────────────────────────────────────────────
 async function muatAnalisis() {
   try {
-    const res = await fetch('/api/analisis');
+    const res = await fetch(apiUrl('/api/analisis'));
     if (!res.ok) return;
     const json = await res.json();
     const d = json.data || {};
@@ -1027,7 +1062,7 @@ async function muatRiwayat() {
     const q = document.getElementById('f-query').value;
 
     const url = `/api/riwayat?limit=${limit}&sumber=${encodeURIComponent(sumber)}&vonis=${encodeURIComponent(vonis)}&metode=${encodeURIComponent(metode)}&query=${encodeURIComponent(q)}`;
-    const res = await fetch(url);
+    const res = await fetch(apiUrl(url));
     if (!res.ok) return;
     const json = await res.json();
     const rows = json.data || [];
@@ -1058,7 +1093,7 @@ async function muatRiwayat() {
 // ── Tab 4: Sesi Pengguna ───────────────────────────────────────────────────
 async function muatSesi() {
   try {
-    const res = await fetch('/api/sesi');
+    const res = await fetch(apiUrl('/api/sesi'));
     if (!res.ok) return;
     const json = await res.json();
     const rows = json.data || [];
@@ -1087,7 +1122,7 @@ async function muatSesi() {
 
 async function bersihkanSesiMati() {
   try {
-    const res = await fetch('/api/sesi/bersihkan', { method: 'POST' });
+    const res = await fetch(apiUrl('/api/sesi/bersihkan'), { method: 'POST' });
     if (res.ok) muatSesi();
   } catch(e) {}
 }
@@ -1095,7 +1130,7 @@ async function bersihkanSesiMati() {
 // ── Tab 5: Sistem ──────────────────────────────────────────────────────────
 async function muatSistem() {
   try {
-    const res = await fetch('/api/sistem');
+    const res = await fetch(apiUrl('/api/sistem'));
     if (!res.ok) return;
     const json = await res.json();
     const d = json.data || {};
@@ -1109,7 +1144,7 @@ async function muatSistem() {
 let ws = null;
 function sambungkanWebSocket() {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${protocol}//${window.location.host}/ws/live`;
+  const wsUrl = `${protocol}//${window.location.host}/ws/live` + (adminToken ? `?token=${encodeURIComponent(adminToken)}` : '');
   
   ws = new WebSocket(wsUrl);
 
@@ -1141,7 +1176,7 @@ function sambungkanWebSocket() {
 async function pollingStatus() {
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     try {
-      const res = await fetch('/api/status');
+      const res = await fetch(apiUrl('/api/status'));
       if (res.ok) {
         const d = await res.json();
         applyLivePayload(d);
@@ -1149,6 +1184,10 @@ async function pollingStatus() {
     } catch(e) {}
   }
 }
+
+// Setup CSV link
+const btnCsv = document.getElementById('btn-csv-export');
+if (btnCsv) btnCsv.href = apiUrl('/api/ekspor/csv');
 
 // Inisialisasi awal
 sambungkanWebSocket();

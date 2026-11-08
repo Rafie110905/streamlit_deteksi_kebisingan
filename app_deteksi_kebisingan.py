@@ -20,6 +20,8 @@ from sklearn.preprocessing import StandardScaler, RobustScaler
 from sklearn.svm import SVC
 import secrets
 from datetime import datetime
+import altair as alt
+import streamlit.components.v1 as components
 from deteksi_logger import (
     inisialisasi_db, log_deteksi, daftar_sesi, hapus_sesi_mati,
     ambil_riwayat, ambil_status_terkini, ambil_data_grafik, hitung_statistik,
@@ -753,7 +755,7 @@ with tab_riw:
 
 
 with tab_admin:
-    st.subheader("Panel Admin & Monitoring")
+    st.subheader("Panel Admin & Monitoring Akustik")
     admin_pass = os.getenv("ADMIN_PASS")
     if not admin_pass:
         try:
@@ -765,10 +767,16 @@ with tab_admin:
         st.session_state.admin_terotentikasi = False
 
     if not st.session_state.admin_terotentikasi:
-        st.caption("Akses dibatasi khusus administrator.")
+        st.markdown("""
+        <div style="background:#131d33;border:1px solid #24324f;border-radius:14px;padding:26px;max-width:480px;margin:30px auto;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.4)">
+            <div style="font-size:38px;margin-bottom:10px">🔒</div>
+            <h3 style="color:#f8fafc;font-size:20px;margin-bottom:6px">Portal Administrator</h3>
+            <p style="font-size:12px;color:#94a3b8;margin-bottom:18px">Masukkan kata sandi admin untuk mengakses metrik real-time, audit log, dan analitik mendalam.</p>
+        </div>
+        """, unsafe_allow_html=True)
         with st.form("form_login_admin"):
             input_pass = st.text_input("Kata Sandi Admin", type="password", placeholder="Masukkan kata sandi admin...")
-            tbl_masuk = st.form_submit_button("Masuk ke Panel Admin")
+            tbl_masuk = st.form_submit_button("Masuk ke Panel Admin", use_container_width=True)
             if tbl_masuk:
                 if secrets.compare_digest(input_pass.encode("utf-8"), str(admin_pass).encode("utf-8")):
                     st.session_state.admin_terotentikasi = True
@@ -777,159 +785,482 @@ with tab_admin:
                 else:
                     st.error("Kata sandi salah. Akses ditolak.")
     else:
-        kol_judul, kol_link, kol_keluar = st.columns([4, 2, 1])
-        with kol_judul:
-            st.success("Terkoneksi sebagai Administrator.")
+        # Top Action Bar
+        kol_mode, kol_refresh, kol_link, kol_keluar = st.columns([3, 1, 1.6, 0.8])
+        with kol_mode:
+            opsi_tampilan = st.radio(
+                "Mode Tampilan Dashboard",
+                ["🎨 Tampilan Native Cyber HD", "🌐 Portal Dashboard Standalone (Embedded Live WS)"],
+                horizontal=True,
+                label_visibility="collapsed"
+            )
+        with kol_refresh:
+            if st.button("🔄 Segarkan", key="btn_refresh_adm", use_container_width=True, help="Muat ulang seluruh metrik & riwayat terbaru"):
+                st.rerun()
         with kol_link:
-            st.link_button("🚀 Buka Dashboard Web (Port 8000)", url="http://localhost:8000", help="Buka dashboard standalone realtime di tab browser baru")
+            st.link_button("🚀 Buka Portal (Port 8000)", url="http://localhost:8000", use_container_width=True, help="Buka dashboard standalone di jendela browser terpisah")
         with kol_keluar:
-            if st.button("Keluar", key="tbl_keluar_admin"):
+            if st.button("Keluar", key="tbl_keluar_admin", use_container_width=True):
                 st.session_state.admin_terotentikasi = False
                 st.rerun()
 
         st.divider()
 
-        sub_live, sub_analisis, sub_riwayat, sub_sesi, sub_sistem = st.tabs([
-            "📡 Live Monitoring",
-            "📊 Analisis & Statistik",
-            "📋 Audit Log & Ekspor",
-            "👥 Sesi Pengguna",
-            "⚙️ Status Sistem & Model"
-        ])
+        # OPSI A: Portal Standalone Embedded
+        if opsi_tampilan == "🌐 Portal Dashboard Standalone (Embedded Live WS)":
+            embed_url = f"http://localhost:8000/embed?token={admin_pass}"
+            components.iframe(embed_url, height=920, scrolling=True)
+            st.caption("💡 Tips: Anda juga dapat mengakses portal langsung di tab baru melalui [http://localhost:8000](http://localhost:8000)")
 
-        with sub_live:
-            stat = hitung_statistik()
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Pengguna Aktif (Sesi)", stat.get("sesi_aktif", 0))
-            m2.metric("Total Deteksi", stat.get("total", 0))
-            m3.metric("Terdeteksi Berisik", f"{stat.get('berisik', 0)} ({stat.get('persen_berisik', 0)}%)")
-            m4.metric("Deteksi Hari Ini", f"{stat.get('hari_ini', 0)} ({stat.get('berisik_hari_ini', 0)} bising)")
+        # OPSI B: Tampilan Native Cyber HD
+        else:
+            # ── Helpers Desain Cyber ─────────────────────────────────────────
+            def _badge_sumber_html(sumber_text):
+                s = str(sumber_text or "")
+                if "Realtime" in s:
+                    return '<span style="background:rgba(6,182,212,0.18);color:#06b6d4;border:1px solid rgba(6,182,212,0.35);padding:3px 9px;border-radius:999px;font-weight:700;font-size:11px;display:inline-block">📡 Realtime</span>'
+                elif "Rekam" in s:
+                    return '<span style="background:rgba(139,92,246,0.18);color:#8b5cf6;border:1px solid rgba(139,92,246,0.35);padding:3px 9px;border-radius:999px;font-weight:700;font-size:11px;display:inline-block">🎙️ Rekam</span>'
+                elif "Upload" in s or "Unggah" in s:
+                    return '<span style="background:rgba(59,130,246,0.18);color:#3b82f6;border:1px solid rgba(59,130,246,0.35);padding:3px 9px;border-radius:999px;font-weight:700;font-size:11px;display:inline-block">📁 Upload</span>'
+                return f'<span style="background:rgba(148,163,184,0.15);color:#94a3b8;border:1px solid rgba(148,163,184,0.3);padding:3px 9px;border-radius:999px;font-size:11px">{s}</span>'
 
-            st.markdown("##### 📁 Rincian Sumber Deteksi Audio")
-            sc1, sc2, sc3 = st.columns(3)
-            sc1.metric("📡 Realtime WebRTC", stat.get("total_realtime", 0))
-            sc2.metric("🎙️ Rekam Langsung", stat.get("total_rekam", 0))
-            sc3.metric("📁 Upload Berkas", stat.get("total_upload", 0))
+            def _badge_vonis_html(vonis_text):
+                v = str(vonis_text or "")
+                if v == "BERISIK":
+                    return '<span style="background:rgba(239,68,68,0.18);color:#ef4444;border:1px solid rgba(239,68,68,0.35);padding:3px 9px;border-radius:999px;font-weight:700;font-size:11px;display:inline-block">● BERISIK</span>'
+                return '<span style="background:rgba(16,185,129,0.18);color:#10b981;border:1px solid rgba(16,185,129,0.35);padding:3px 9px;border-radius:999px;font-weight:700;font-size:11px;display:inline-block">● TENANG</span>'
 
-            st.markdown("#### Status Deteksi Terkini")
-            terkini = ambil_status_terkini()
-            if terkini:
-                warna_vonis = WARNA["berisik"] if terkini["vonis"] == "BERISIK" else WARNA["tenang"]
-                st.markdown(
-                    f"""
-                    <div style="background:{WARNA['panel']};border-left:6px solid {warna_vonis};padding:14px 18px;border-radius:8px;margin-bottom:15px">
-                        <div style="font-size:12px;color:{WARNA['redup']}">WAKTU: {terkini['timestamp']} · SUMBER: <b>{terkini['sumber']}</b> · METODE: {terkini['metode']}</div>
-                        <div style="font-size:24px;font-weight:700;color:{warna_vonis};margin:4px 0">{terkini['vonis']}</div>
-                        <div style="font-size:13px;color:{WARNA['teks']}">
-                            Level RMS: <b>{f"{terkini['rms_dbfs']:.1f} dBFS" if terkini['rms_dbfs'] is not None else "-"}</b> |
-                            Probabilitas: <b>{f"{terkini['p_berisik']:.3f}" if terkini['p_berisik'] is not None else "-"}</b> |
-                            Berkas: <i>{terkini['nama_file'] or 'Mikrofon / Realtime'}</i>
+            def _kartu_kpi_html(label, val, sub, border_col, val_col):
+                return f"""
+                <div style="background:#131d33;border:1px solid #24324f;border-left:4px solid {border_col};border-radius:12px;padding:14px 18px;margin-bottom:14px">
+                    <div style="font-size:11px;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:0.8px">{label}</div>
+                    <div style="font-size:30px;font-weight:900;color:{val_col};margin:4px 0;line-height:1.2">{val}</div>
+                    <div style="font-size:11px;color:#64748b">{sub}</div>
+                </div>
+                """
+
+            def _hero_status_html(terkini_data):
+                if not terkini_data:
+                    return '<div style="background:#131d33;border:1px solid #24324f;border-radius:14px;padding:24px;text-align:center;color:#94a3b8">Belum ada data deteksi di basis data.</div>'
+                is_berisik = terkini_data.get("vonis") == "BERISIK"
+                w_vonis = "#ef4444" if is_berisik else "#10b981"
+                bg_grad = "rgba(239,68,68,0.12)" if is_berisik else "rgba(16,185,129,0.12)"
+                shadow = "rgba(239,68,68,0.6)" if is_berisik else "rgba(16,185,129,0.4)"
+
+                raw_db = terkini_data.get("rms_dbfs")
+                db_val = float(raw_db) if raw_db is not None else -60.0
+                pct = max(0.0, min(100.0, ((db_val + 60.0) / 60.0) * 100.0))
+                vu_col = "#ef4444" if db_val >= -20.0 else "#f59e0b" if db_val >= -30.0 else "#10b981"
+
+                badge_sumber = _badge_sumber_html(terkini_data.get("sumber"))
+                keyakinan = terkini_data.get("keyakinan") or "STANDAR"
+                p_str = f" · P={terkini_data['p_berisik']:.3f}" if terkini_data.get("p_berisik") is not None else ""
+                file_str = f" · File: {terkini_data.get('nama_file')}" if terkini_data.get("nama_file") else ""
+
+                return f"""
+                <div style="background:linear-gradient(90deg, {bg_grad} 0%, #131d33 70%);border:1px solid #24324f;border-left:8px solid {w_vonis};border-radius:14px;padding:22px 26px;margin-bottom:20px">
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+                        <div>
+                            <div style="font-size:11px;letter-spacing:1.5px;color:#94a3b8;font-weight:800;text-transform:uppercase">STATUS AKUSTIK TERKINI</div>
+                            <div style="font-size:38px;font-weight:900;color:{w_vonis};text-shadow:0 0 20px {shadow};line-height:1.2;margin:4px 0">{terkini_data.get('vonis')}</div>
+                            <div style="font-size:12px;color:#cbd5e1;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                                <span>{terkini_data.get('timestamp')}</span> · 
+                                {badge_sumber} · 
+                                <span><b>{terkini_data.get('metode')}</b>{p_str}{file_str}</span>
+                            </div>
+                        </div>
+                        <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:8px">
+                            <div style="width:18px;height:18px;border-radius:50%;background:{w_vonis};box-shadow:0 0 16px {shadow}"></div>
+                            <div style="background:#070d1a;padding:6px 12px;border-radius:8px;border:1px solid #24324f;font-size:11px;color:#94a3b8">
+                                KEYAKINAN: <b style="color:#f8fafc">{keyakinan}</b>
+                            </div>
                         </div>
                     </div>
-                    """,
-                    unsafe_allow_html=True
-                )
-            else:
-                st.info("Belum ada data deteksi yang tercatat di database.")
+                    
+                    <!-- Digital VU Meter -->
+                    <div style="margin-top:16px;max-width:560px">
+                        <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px">
+                            <span style="color:#94a3b8;font-weight:700">Digital VU Meter (Level Suara)</span>
+                            <b style="color:#f8fafc">{db_val:.1f} dBFS</b>
+                        </div>
+                        <div style="height:14px;background:#070d1a;border-radius:7px;border:1px solid #24324f;overflow:hidden">
+                            <div style="width:{pct:.1f}%;height:100%;background:{vu_col};border-radius:7px;transition:width 0.3s"></div>
+                        </div>
+                        <div style="display:flex;justify-content:space-between;font-size:10px;color:#64748b;margin-top:4px">
+                            <span>-60 dB (Sunyi)</span>
+                            <span>-30 dB (Wajar)</span>
+                            <span>-20 dB (Batas Bising)</span>
+                            <span>0 dB (Keras)</span>
+                        </div>
+                    </div>
+                </div>
+                """
 
-            st.markdown("#### Grafik Level Suara (RMS dBFS) — 15 Menit Terakhir")
-            data_grafik = ambil_data_grafik(menit=15)
-            if data_grafik:
-                df_grafik = pd.DataFrame(data_grafik)
-                if "timestamp" in df_grafik.columns and "rms_dbfs" in df_grafik.columns:
-                    df_grafik["waktu"] = df_grafik["timestamp"].apply(lambda x: x.split(" ")[-1] if " " in str(x) else str(x))
-                    st.line_chart(df_grafik.set_index("waktu")["rms_dbfs"], width="stretch")
-            else:
-                st.caption("Belum ada data level suara dalam 15 menit terakhir.")
+            sub_live, sub_analisis, sub_riwayat, sub_sesi, sub_sistem = st.tabs([
+                "📡 Live Monitoring",
+                "📊 Analisis & Statistik",
+                "📋 Audit Log & Ekspor",
+                "👥 Sesi Pengguna",
+                "⚙️ Status Sistem & Model"
+            ])
 
-        with sub_analisis:
-            analisis = ambil_analisis_mendalam()
-            eks = analisis.get("ekstrem", {})
-            e1, e2, e3 = st.columns(3)
-            e1.metric("Peak RMS Terkeras", f"{eks.get('max_rms', '-')} dBFS")
-            e2.metric("Rata-rata RMS", f"{eks.get('avg_rms', '-')} dBFS")
-            e3.metric("Noise Floor Terendah", f"{eks.get('min_rms', '-')} dBFS")
+            # ── 1. SUB-TAB: LIVE MONITORING ──────────────────────────────────
+            with sub_live:
+                stat = hitung_statistik()
+                terkini = ambil_status_terkini()
 
-            st.divider()
-            c1, c2 = st.columns(2)
-            with c1:
-                st.markdown("##### ⏰ Pola Kebisingan per Jam (24 Jam)")
-                jam_data = analisis.get("per_jam", [])
-                if jam_data:
-                    df_jam = pd.DataFrame(jam_data).set_index("jam")
-                    st.bar_chart(df_jam[["berisik", "total"]], width="stretch")
+                # Status Hero
+                st.markdown(_hero_status_html(terkini), unsafe_allow_html=True)
+
+                # 5 Metrik Ringkasan Utama
+                c1, c2, c3, c4, c5 = st.columns(5)
+                with c1:
+                    st.markdown(_kartu_kpi_html("Total Deteksi", stat.get("total", 0), "Keseluruhan sesi", "#3b82f6", "#3b82f6"), unsafe_allow_html=True)
+                with c2:
+                    st.markdown(_kartu_kpi_html("Vonis Berisik", stat.get("berisik", 0), f"{stat.get('persen_berisik', 0)}% rasio", "#ef4444", "#ef4444"), unsafe_allow_html=True)
+                with c3:
+                    st.markdown(_kartu_kpi_html("Vonis Tenang", stat.get("tenang", 0), "Kondisi kondusif", "#10b981", "#10b981"), unsafe_allow_html=True)
+                with c4:
+                    st.markdown(_kartu_kpi_html("Hari Ini", stat.get("hari_ini", 0), f"{stat.get('berisik_hari_ini', 0)} bising", "#f59e0b", "#f59e0b"), unsafe_allow_html=True)
+                with c5:
+                    st.markdown(_kartu_kpi_html("Klien Aktif", stat.get("sesi_aktif", 0), "Sesi online aktif", "#06b6d4", "#06b6d4"), unsafe_allow_html=True)
+
+                # 3 Metrik Sumber Audio
+                st.markdown('<div style="font-size:11px;font-weight:800;color:#94a3b8;text-transform:uppercase;letter-spacing:0.8px;margin:8px 0 10px 0">DISTRIBUSI DATA SUMBER AUDIO</div>', unsafe_allow_html=True)
+                s1, s2, s3 = st.columns(3)
+                with s1:
+                    st.markdown(_kartu_kpi_html("📡 Realtime WebRTC", stat.get("total_realtime", 0), "Streaming mikrofon langsung", "#06b6d4", "#06b6d4"), unsafe_allow_html=True)
+                with s2:
+                    st.markdown(_kartu_kpi_html("🎙️ Rekam Langsung", stat.get("total_rekam", 0), "Audio input rekaman suara", "#8b5cf6", "#8b5cf6"), unsafe_allow_html=True)
+                with s3:
+                    st.markdown(_kartu_kpi_html("📁 Upload Berkas", stat.get("total_upload", 0), "Berkas rekaman diunggah", "#3b82f6", "#3b82f6"), unsafe_allow_html=True)
+
+                # Grafik Live RMS Altair
+                st.markdown("#### 📈 Aliran Level Suara (dBFS) — 15 Menit Terakhir")
+                data_grafik = ambil_data_grafik(menit=15)
+                if data_grafik:
+                    df_g = pd.DataFrame(data_grafik)
+                    df_g["waktu"] = df_g["timestamp"].apply(lambda x: str(x).split(" ")[-1] if " " in str(x) else str(x))
+                    df_g["rms"] = df_g["rms_dbfs"].fillna(-60.0).round(1)
+
+                    base_ch = alt.Chart(df_g).encode(
+                        x=alt.X("waktu:N", title="Waktu", axis=alt.Axis(labelColor="#94a3b8", titleColor="#94a3b8", labelAngle=-45)),
+                        y=alt.Y("rms:Q", title="Level RMS (dBFS)", scale=alt.Scale(domain=[-60, 0]), axis=alt.Axis(labelColor="#94a3b8", titleColor="#94a3b8", gridColor="#1e293b"))
+                    )
+                    line_ch = base_ch.mark_line(color="#3b82f6", strokeWidth=2, interpolate="monotone")
+                    area_ch = base_ch.mark_area(color="#3b82f6", opacity=0.15, interpolate="monotone")
+                    dots_ch = base_ch.mark_circle(size=60).encode(
+                        color=alt.Color("vonis:N", scale=alt.Scale(domain=["BERISIK", "TIDAK BERISIK"], range=["#ef4444", "#10b981"]), legend=alt.Legend(title="Vonis", labelColor="#f8fafc", titleColor="#94a3b8")),
+                        tooltip=[alt.Tooltip("timestamp:N", title="Waktu"), alt.Tooltip("rms:Q", title="RMS (dBFS)"), alt.Tooltip("vonis:N", title="Vonis")]
+                    )
+                    rule_ch = alt.Chart(pd.DataFrame({"y": [-20]})).mark_rule(color="#ef4444", strokeDash=[6, 4], size=1.5).encode(y="y:Q")
+                    chart_full = (area_ch + line_ch + dots_ch + rule_ch).properties(height=260).configure_view(strokeWidth=0).configure(background="#070d1a")
+                    st.altair_chart(chart_full, use_container_width=True)
                 else:
-                    st.caption("Belum ada data per jam.")
-            with c2:
-                st.markdown("##### 🤖 Komparasi Metode Klasifikasi")
-                met_data = analisis.get("per_metode", [])
-                if met_data:
-                    df_met = pd.DataFrame(met_data).set_index("metode")
-                    st.bar_chart(df_met[["berisik", "tenang"]], width="stretch")
+                    st.info("Belum ada aliran data suara dalam 15 menit terakhir.")
+
+            # ── 2. SUB-TAB: ANALISIS & STATISTIK ─────────────────────────────
+            with sub_analisis:
+                analisis = ambil_analisis_mendalam()
+                eks = analisis.get("ekstrem", {})
+
+                # 3 Kartu Ekstrem
+                e1, e2, e3 = st.columns(3)
+                with e1:
+                    st.markdown(_kartu_kpi_html("RMS Terkeras (Peak)", f"{eks.get('max_rms', '-')} dBFS", "Puncak energi sinyal", "#ef4444", "#ef4444"), unsafe_allow_html=True)
+                with e2:
+                    st.markdown(_kartu_kpi_html("RMS Rata-Rata", f"{eks.get('avg_rms', '-')} dBFS", "Tingkat kebisingan umum", "#3b82f6", "#3b82f6"), unsafe_allow_html=True)
+                with e3:
+                    st.markdown(_kartu_kpi_html("RMS Paling Hening", f"{eks.get('min_rms', '-')} dBFS", "Noise floor dasar", "#10b981", "#10b981"), unsafe_allow_html=True)
+
+                st.divider()
+
+                # Dua Grafik Analisis Altair
+                ca1, ca2 = st.columns(2)
+                with ca1:
+                    st.markdown("##### ⏰ Pola Kebisingan Berdasarkan Jam")
+                    jam_data = analisis.get("per_jam", [])
+                    if jam_data:
+                        df_jam = pd.DataFrame(jam_data)
+                        df_jam["jam_label"] = df_jam["jam"].apply(lambda j: f"{j}:00")
+                        ch_jam = alt.Chart(df_jam).transform_fold(
+                            ["berisik", "total"], as_=["Kategori", "Jumlah"]
+                        ).mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4).encode(
+                            x=alt.X("jam_label:N", title="Jam"),
+                            y=alt.Y("Jumlah:Q", title="Frekuensi"),
+                            color=alt.Color("Kategori:N", scale=alt.Scale(domain=["berisik", "total"], range=["#ef4444", "#3b82f6"])),
+                            xOffset="Kategori:N"
+                        ).properties(height=260).configure_view(strokeWidth=0).configure(background="#070d1a")
+                        st.altair_chart(ch_jam, use_container_width=True)
+                    else:
+                        st.caption("Belum ada data rekaman per jam.")
+
+                with ca2:
+                    st.markdown("##### 🤖 Komparasi Metode Klasifikasi")
+                    met_data = analisis.get("per_metode", [])
+                    if met_data:
+                        df_met = pd.DataFrame(met_data)
+                        ch_met = alt.Chart(df_met).transform_fold(
+                            ["berisik", "tenang"], as_=["Status", "Jumlah"]
+                        ).mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4).encode(
+                            x=alt.X("metode:N", title="Metode"),
+                            y=alt.Y("Jumlah:Q", title="Jumlah Deteksi"),
+                            color=alt.Color("Status:N", scale=alt.Scale(domain=["berisik", "tenang"], range=["#ef4444", "#10b981"])),
+                            xOffset="Status:N"
+                        ).properties(height=260).configure_view(strokeWidth=0).configure(background="#070d1a")
+                        st.altair_chart(ch_met, use_container_width=True)
+                    else:
+                        st.caption("Belum ada data metode.")
+
+                st.divider()
+
+                # Komparasi Sumber Audio
+                st.markdown("##### 🎙️ Komparasi Karakteristik Sumber Audio")
+                sum_data = analisis.get("per_sumber", [])
+                if sum_data:
+                    df_sum = pd.DataFrame(sum_data)
+                    ch_sum = alt.Chart(df_sum).transform_fold(
+                        ["berisik", "tenang"], as_=["Status", "Jumlah"]
+                    ).mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4).encode(
+                        x=alt.X("sumber:N", title="Sumber Audio"),
+                        y=alt.Y("Jumlah:Q", title="Jumlah Deteksi"),
+                        color=alt.Color("Status:N", scale=alt.Scale(domain=["berisik", "tenang"], range=["#ef4444", "#10b981"])),
+                        xOffset="Status:N"
+                    ).properties(height=240).configure_view(strokeWidth=0).configure(background="#070d1a")
+                    st.altair_chart(ch_sum, use_container_width=True)
+
+                    # Tabel Karakteristik Sumber
+                    rows_html = ""
+                    for r in sum_data:
+                        total_cnt = r.get("total", 0)
+                        berisik_cnt = r.get("berisik", 0)
+                        tenang_cnt = r.get("tenang", total_cnt - berisik_cnt)
+                        rasio = f"{berisik_cnt / total_cnt * 100:.1f}%" if total_cnt else "0%"
+                        avg_r = f"{r['avg_rms']:.1f} dBFS" if r.get("avg_rms") is not None else "—"
+                        rows_html += f"""
+                        <tr>
+                            <td style="padding:10px 14px;border-bottom:1px solid #24324f">{_badge_sumber_html(r.get('sumber'))}</td>
+                            <td style="padding:10px 14px;border-bottom:1px solid #24324f"><b>{total_cnt}</b></td>
+                            <td style="padding:10px 14px;border-bottom:1px solid #24324f;color:#ef4444;font-weight:700">{berisik_cnt}</td>
+                            <td style="padding:10px 14px;border-bottom:1px solid #24324f;color:#10b981;font-weight:700">{tenang_cnt}</td>
+                            <td style="padding:10px 14px;border-bottom:1px solid #24324f"><b>{rasio}</b></td>
+                            <td style="padding:10px 14px;border-bottom:1px solid #24324f">{avg_r}</td>
+                        </tr>
+                        """
+                    table_html = f"""
+                    <div style="border:1px solid #24324f;border-radius:12px;overflow:hidden;margin-top:12px">
+                        <table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left;background:#131d33">
+                            <thead style="background:#0e1628;color:#94a3b8;font-size:11px;text-transform:uppercase">
+                                <tr>
+                                    <th style="padding:12px 14px">Sumber Audio</th>
+                                    <th style="padding:12px 14px">Total Pengujian</th>
+                                    <th style="padding:12px 14px">Vonis Berisik</th>
+                                    <th style="padding:12px 14px">Vonis Tenang</th>
+                                    <th style="padding:12px 14px">Rasio Berisik</th>
+                                    <th style="padding:12px 14px">Rata-rata RMS</th>
+                                </tr>
+                            </thead>
+                            <tbody>{rows_html}</tbody>
+                        </table>
+                    </div>
+                    """
+                    st.markdown(table_html, unsafe_allow_html=True)
                 else:
-                    st.caption("Belum ada data metode.")
+                    st.caption("Belum ada data sumber audio.")
 
-            st.divider()
-            st.markdown("##### 🎙️ Distribusi & Komparasi Sumber Audio")
-            sum_data = analisis.get("per_sumber", [])
-            if sum_data:
-                df_sum = pd.DataFrame(sum_data)
-                col_name = "sumber" if "sumber" in df_sum.columns else "sumber_label"
-                df_sum_plot = df_sum.set_index(col_name)
-                cols_to_plot = [c for c in ["berisik", "tenang"] if c in df_sum_plot.columns]
-                if cols_to_plot:
-                    st.bar_chart(df_sum_plot[cols_to_plot], width="stretch")
-                st.dataframe(df_sum, width="stretch")
-            else:
-                st.caption("Belum ada data sumber audio.")
+            # ── 3. SUB-TAB: AUDIT LOG & EKSPOR ───────────────────────────────
+            with sub_riwayat:
+                f1, f2, f3, f4, f5 = st.columns([1.2, 1, 1, 1.5, 0.8])
+                with f1:
+                    f_sumber = st.selectbox("Sumber", ["Semua", "Realtime WebRTC", "Rekam Langsung", "Upload Berkas"], key="adm_f_sumber_hd")
+                with f2:
+                    f_vonis = st.selectbox("Vonis", ["Semua", "BERISIK", "TIDAK BERISIK"], key="adm_f_vonis_hd")
+                with f3:
+                    f_metode = st.selectbox("Metode", ["Semua", "Random Forest", "KNN", "SVM", "RMS"], key="adm_f_metode_hd")
+                with f4:
+                    f_q = st.text_input("Cari berkas / sesi", placeholder="Kata kunci...", key="adm_f_q_hd")
+                with f5:
+                    f_lim = st.selectbox("Baris", [25, 50, 100], index=1, key="adm_f_lim_hd")
 
-        with sub_riwayat:
-            f1, f2, f3, f4 = st.columns([1, 1, 1, 2])
-            with f1:
-                f_sumber = st.selectbox("Filter Sumber", ["Semua", "Realtime WebRTC", "Rekam Langsung", "Upload Berkas"], key="adm_f_sumber")
-            with f2:
-                f_vonis = st.selectbox("Filter Vonis", ["Semua", "BERISIK", "TIDAK BERISIK"], key="adm_f_vonis")
-            with f3:
-                f_metode = st.selectbox("Filter Metode", ["Semua", "Random Forest", "KNN", "SVM", "RMS"], key="adm_f_metode")
-            with f4:
-                f_q = st.text_input("Cari file / sesi ID", placeholder="Ketik kata kunci...", key="adm_f_q")
+                data_riwayat = ambil_riwayat_terfilter(limit=f_lim, vonis=f_vonis, metode=f_metode, query=f_q, sumber=f_sumber)
 
-            data_riwayat = ambil_riwayat_terfilter(limit=100, vonis=f_vonis, metode=f_metode, query=f_q, sumber=f_sumber)
-            if data_riwayat:
-                df_admin = pd.DataFrame(data_riwayat)
-                st.dataframe(df_admin, width="stretch")
-                csv_data = df_admin.to_csv(index=False).encode("utf-8")
-                st.download_button(
-                    "📥 Unduh Hasil Filter (CSV)",
-                    data=csv_data,
-                    file_name=f"log_kebisingan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv",
-                )
-            else:
-                st.info("Tidak ada data riwayat yang cocok dengan filter.")
+                if data_riwayat:
+                    rows_riw_html = ""
+                    for r in data_riwayat:
+                        p_str = f"{r['p_berisik']:.3f}" if r.get("p_berisik") is not None else "—"
+                        rms_str = f"<b>{r['rms_dbfs']:.1f} dBFS</b>" if r.get("rms_dbfs") is not None else "—"
+                        sesi_str = f"<code>{r['sesi_id'][:8]}…</code>" if r.get("sesi_id") else "—"
+                        file_str = r.get("nama_file") or "—"
+                        rows_riw_html += f"""
+                        <tr>
+                            <td style="padding:10px 12px;border-bottom:1px solid #24324f;color:#64748b;font-weight:700">{r.get('id')}</td>
+                            <td style="padding:10px 12px;border-bottom:1px solid #24324f;color:#cbd5e1;font-size:11px">{r.get('timestamp')}</td>
+                            <td style="padding:10px 12px;border-bottom:1px solid #24324f">{_badge_sumber_html(r.get('sumber'))}</td>
+                            <td style="padding:10px 12px;border-bottom:1px solid #24324f"><b>{r.get('metode')}</b></td>
+                            <td style="padding:10px 12px;border-bottom:1px solid #24324f">{_badge_vonis_html(r.get('vonis'))}</td>
+                            <td style="padding:10px 12px;border-bottom:1px solid #24324f">{p_str}</td>
+                            <td style="padding:10px 12px;border-bottom:1px solid #24324f">{rms_str}</td>
+                            <td style="padding:10px 12px;border-bottom:1px solid #24324f;color:#94a3b8;font-size:11px">{r.get('keyakinan') or '—'}</td>
+                            <td style="padding:10px 12px;border-bottom:1px solid #24324f;color:#94a3b8;font-size:11px">{file_str}</td>
+                            <td style="padding:10px 12px;border-bottom:1px solid #24324f">{sesi_str}</td>
+                        </tr>
+                        """
+                    table_riw = f"""
+                    <div style="border:1px solid #24324f;border-radius:12px;overflow-x:auto;margin-top:12px">
+                        <table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left;background:#131d33">
+                            <thead style="background:#0e1628;color:#94a3b8;font-size:11px;text-transform:uppercase">
+                                <tr>
+                                    <th style="padding:12px 14px">ID</th>
+                                    <th style="padding:12px 14px">Waktu</th>
+                                    <th style="padding:12px 14px">Sumber</th>
+                                    <th style="padding:12px 14px">Metode</th>
+                                    <th style="padding:12px 14px">Vonis</th>
+                                    <th style="padding:12px 14px">P(Bising)</th>
+                                    <th style="padding:12px 14px">RMS dBFS</th>
+                                    <th style="padding:12px 14px">Keyakinan</th>
+                                    <th style="padding:12px 14px">Berkas</th>
+                                    <th style="padding:12px 14px">Sesi ID</th>
+                                </tr>
+                            </thead>
+                            <tbody>{rows_riw_html}</tbody>
+                        </table>
+                    </div>
+                    """
+                    st.markdown(table_riw, unsafe_allow_html=True)
 
-        with sub_sesi:
-            st.markdown("#### Sesi Klien Streamlit")
-            kol_s1, kol_s2 = st.columns([4, 1])
-            with kol_s2:
-                if st.button("🧹 Bersihkan Sesi Mati", key="btn_bersihkan_sesi_st"):
-                    bersihkan_sesi_manual()
-                    st.success("Sesi tidak aktif dibersihkan.")
-                    st.rerun()
+                    # Tombol unduh CSV
+                    df_adm_csv = pd.DataFrame(data_riwayat)
+                    csv_bytes = df_adm_csv.to_csv(index=False).encode("utf-8")
+                    st.download_button(
+                        "📥 Unduh Audit Log Terfilter (CSV)",
+                        data=csv_bytes,
+                        file_name=f"audit_kebisingan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv",
+                    )
+                else:
+                    st.info("Tidak ada data riwayat yang cocok dengan filter yang dipilih.")
 
-            sesi_list = ambil_daftar_sesi()
-            if sesi_list:
-                st.dataframe(pd.DataFrame(sesi_list), width="stretch")
-            else:
-                st.caption("Belum ada sesi tercatat.")
+            # ── 4. SUB-TAB: SESI PENGGUNA ─────────────────────────────────────
+            with sub_sesi:
+                kol_s1, kol_s2 = st.columns([4, 1.2])
+                with kol_s1:
+                    st.markdown("#### 👥 Sesi Klien Streamlit Aktif")
+                    st.caption("Klien yang aktif mengirim sinyal dalam 60 detik terakhir ditandai Online.")
+                with kol_s2:
+                    if st.button("🧹 Bersihkan Sesi Mati", key="btn_bersihkan_sesi_hd", use_container_width=True):
+                        bersihkan_sesi_manual()
+                        st.success("Sesi tidak aktif berhasil dibersihkan.")
+                        st.rerun()
 
-        with sub_sistem:
-            sis = ambil_status_sistem()
-            st.markdown("#### Informasi Kesehatan Database & Model")
-            st.json(sis)
-            st.markdown("""
-            ##### Rujukan Standar Kebisingan Ruangan:
-            - **Zona Sunyi (< -30 dBFS / < 55 dBA)**: Perpustakaan, ruang rapat, ruang konsentrasi.
-            - **Zona Waspada (-30 s.d. -20 dBFS / 55 - 70 dBA)**: Percakapan aktif, aktivitas normal.
-            - **Zona Berisik (> -20 dBFS / > 85 dBA)**: Kegaduhan tinggi, peringatan diaktifkan.
-            """)
+                sesi_list = ambil_daftar_sesi()
+                if sesi_list:
+                    rows_sesi_html = ""
+                    for s in sesi_list:
+                        status_s = s.get("status", "Offline")
+                        if status_s == "Online":
+                            badge_s = '<span style="background:rgba(16,185,129,0.18);color:#10b981;border:1px solid rgba(16,185,129,0.35);padding:2px 8px;border-radius:999px;font-weight:700;font-size:11px">● Online</span>'
+                        elif status_s == "Idle":
+                            badge_s = '<span style="background:rgba(245,158,11,0.18);color:#f59e0b;border:1px solid rgba(245,158,11,0.35);padding:2px 8px;border-radius:999px;font-weight:700;font-size:11px">● Idle</span>'
+                        else:
+                            badge_s = '<span style="background:rgba(148,163,184,0.15);color:#94a3b8;border:1px solid rgba(148,163,184,0.3);padding:2px 8px;border-radius:999px;font-size:11px">● Offline</span>'
+
+                        rows_sesi_html += f"""
+                        <tr>
+                            <td style="padding:10px 14px;border-bottom:1px solid #24324f">{badge_s}</td>
+                            <td style="padding:10px 14px;border-bottom:1px solid #24324f;font-family:monospace;font-weight:700">{s.get('sesi_id')}</td>
+                            <td style="padding:10px 14px;border-bottom:1px solid #24324f;font-size:11px;color:#cbd5e1">{s.get('mulai')}</td>
+                            <td style="padding:10px 14px;border-bottom:1px solid #24324f;font-size:11px;color:#cbd5e1">{s.get('terakhir')}</td>
+                            <td style="padding:10px 14px;border-bottom:1px solid #24324f;font-size:11px;color:#94a3b8">{s.get('detik_lalu', 0)} detik lalu</td>
+                        </tr>
+                        """
+                    table_sesi = f"""
+                    <div style="border:1px solid #24324f;border-radius:12px;overflow:hidden;margin-top:12px">
+                        <table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left;background:#131d33">
+                            <thead style="background:#0e1628;color:#94a3b8;font-size:11px;text-transform:uppercase">
+                                <tr>
+                                    <th style="padding:12px 14px">Status</th>
+                                    <th style="padding:12px 14px">Session ID</th>
+                                    <th style="padding:12px 14px">Waktu Mulai</th>
+                                    <th style="padding:12px 14px">Aktivitas Terakhir</th>
+                                    <th style="padding:12px 14px">Terakhir Dilihat</th>
+                                </tr>
+                            </thead>
+                            <tbody>{rows_sesi_html}</tbody>
+                        </table>
+                    </div>
+                    """
+                    st.markdown(table_sesi, unsafe_allow_html=True)
+                else:
+                    st.caption("Belum ada sesi tercatat di database.")
+
+            # ── 5. SUB-TAB: STATUS SISTEM & MODEL ────────────────────────────
+            with sub_sistem:
+                sis = ambil_status_sistem()
+                col_m, col_db = st.columns(2)
+
+                with col_m:
+                    st.markdown("##### 🤖 Model Machine Learning Aktif")
+                    st.markdown("""
+                    <div style="display:flex;flex-direction:column;gap:12px">
+                        <div style="background:#131d33;border:1px solid #24324f;border-left:4px solid #3b82f6;border-radius:10px;padding:14px">
+                            <div style="font-weight:800;color:#3b82f6;font-size:14px">🌲 Random Forest Classifier</div>
+                            <div style="color:#94a3b8;font-size:11px;margin-top:3px">Akurasi Validasi Silang: <b>84.34%</b> · 300 Pohon · 25 Fitur Akustik</div>
+                        </div>
+                        <div style="background:#131d33;border:1px solid #24324f;border-left:4px solid #10b981;border-radius:10px;padding:14px">
+                            <div style="font-weight:800;color:#10b981;font-size:14px">📍 K-Nearest Neighbors (KNN)</div>
+                            <div style="color:#94a3b8;font-size:11px;margin-top:3px">Akurasi Validasi Silang: <b>80.81%</b> · k=13 · Jarak Manhattan (L1) · Distance Weighted</div>
+                        </div>
+                        <div style="background:#131d33;border:1px solid #24324f;border-left:4px solid #8b5cf6;border-radius:10px;padding:14px">
+                            <div style="font-weight:800;color:#8b5cf6;font-size:14px">🎯 Support Vector Machine (SVM)</div>
+                            <div style="color:#94a3b8;font-size:11px;margin-top:3px">Akurasi Validasi Silang: <b>78.79%</b> · C=2.0 · Kernel RBF · RobustScaler (IQR)</div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                with col_db:
+                    st.markdown("##### 🗄️ Kesehatan Server & Database")
+                    db_path_val = sis.get("db_path", "—")
+                    db_size_val = f"{sis.get('db_size_kb', 0)} KB"
+                    db_rows_val = f"{sis.get('total_deteksi', 0)} baris"
+                    st.markdown(f"""
+                    <div style="background:#131d33;border:1px solid #24324f;border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:10px;font-size:13px">
+                        <div style="display:flex;justify-content:space-between;border-bottom:1px solid #24324f;padding-bottom:8px">
+                            <span style="color:#94a3b8">Status Server:</span>
+                            <span style="color:#10b981;font-weight:700">🟢 Running (Healthy)</span>
+                        </div>
+                        <div style="display:flex;justify-content:space-between;border-bottom:1px solid #24324f;padding-bottom:8px">
+                            <span style="color:#94a3b8">Database SQLite:</span>
+                            <span style="font-family:monospace;font-size:11px;color:#f8fafc">{db_path_val}</span>
+                        </div>
+                        <div style="display:flex;justify-content:space-between;border-bottom:1px solid #24324f;padding-bottom:8px">
+                            <span style="color:#94a3b8">Ukuran Database:</span>
+                            <b style="color:#f8fafc">{db_size_val}</b>
+                        </div>
+                        <div style="display:flex;justify-content:space-between;border-bottom:1px solid #24324f;padding-bottom:8px">
+                            <span style="color:#94a3b8">Total Rekaman Log:</span>
+                            <b style="color:#f8fafc">{db_rows_val}</b>
+                        </div>
+                        <div style="display:flex;justify-content:space-between">
+                            <span style="color:#94a3b8">Protokol Realtime:</span>
+                            <span style="color:#06b6d4;font-weight:700">WebSocket + HTTP Fallback</span>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                st.divider()
+
+                # Regulasi Standar Kebisingan
+                st.markdown("""
+                <div style="background:#131d33;border:1px solid #24324f;border-radius:12px;padding:18px">
+                    <h5 style="color:#f8fafc;margin-bottom:8px">📜 Regulasi Ambang Batas Kebisingan Ruangan</h5>
+                    <div style="font-size:12px;line-height:1.7;color:#94a3b8">
+                        Berdasarkan <b>Permenaker No. 5 Tahun 2018</b> dan <b>Kepmen Lingkungan Hidup No. 48 Tahun 1996</b>:
+                        <ul style="margin-left:18px;margin-top:6px">
+                            <li><b style="color:#10b981">Zona Sunyi / Kondusif (< -30 dBFS / < 55 dBA)</b>: Rekomendasi ideal untuk ruang perpustakaan, kantor tenang, ruang belajar, dan lab komputer.</li>
+                            <li><b style="color:#f59e0b">Zona Waspada (-30 s.d. -20 dBFS / 55 - 70 dBA)</b>: Batas percakapan aktif & diskusi kerja tim. Mulai berpotensi memecah fokus konsentrasi tinggi.</li>
+                            <li><b style="color:#ef4444">Zona Berisik (> -20 dBFS / > 85 dBA)</b>: Ambang kebisingan kritis yang memicu alarm suara dan peringatan visual mitigasi kebisingan.</li>
+                        </ul>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
