@@ -1,5 +1,6 @@
 import hashlib
 import os
+import re
 import threading
 from collections import deque
 import numpy as np
@@ -38,6 +39,13 @@ FRAME_LEN, HOP_LEN, SEED = 2048, 512, 42
 FITUR_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fitur_audio_kebisingan.csv")
 WARNA = {"berisik": "#ef4444", "tenang": "#10b981", "ragu": "#f59e0b",
          "gelap": "#090909", "panel": "#171717", "teks": "#f5f5f5", "redup": "#a3a3a3"}
+
+
+def _st_html(html_str: str):
+    """Render HTML di Streamlit secara aman tanpa risiko terdeteksi sebagai Markdown code block."""
+    text = re.sub(r"<!--.*?-->", "", str(html_str), flags=re.DOTALL)
+    clean = " ".join(line.strip() for line in text.splitlines() if line.strip())
+    st.markdown(clean, unsafe_allow_html=True)
 
 
 def cari_audio_peringatan():
@@ -564,11 +572,11 @@ with tab_uji:
             if metode_deteksi == "Model klasifikasi":
                 p_live = hasil_live["p"]
                 berisik_live = tentukan_vonis_model(p_live)
-                st.markdown(kartu_hasil_model(
+                _st_html(kartu_hasil_model(
                     model_klasifikasi, "Deteksi realtime", p_live,
                     hasil_live.get("n_berisik"), hasil_live.get("n_pohon"),
                     fitur_live, berisik_live,
-                ), unsafe_allow_html=True)
+                ))
                 st.caption(
                     f"🟢 **Live** ({_waktu_sekarang}) · Pembaruan ke-{nomor_hasil} · "
                     f"RMS: {fitur_live['rms_dbfs']:.1f} dBFS · "
@@ -576,9 +584,9 @@ with tab_uji:
                 )
             else:
                 berisik_live = tentukan_vonis_rms(fitur_live["rms_dbfs"], ambang_rms_dbfs)
-                st.markdown(kartu_hasil_rms(
+                _st_html(kartu_hasil_rms(
                     "Deteksi realtime", fitur_live, berisik_live, ambang_rms_dbfs
-                ), unsafe_allow_html=True)
+                ))
                 st.caption(f"🟢 **Live** ({_waktu_sekarang}) · Pembaruan ke-{nomor_hasil} · Mode RMS.")
 
             # --- Log hasil realtime ke SQLite (hanya saat ada pembaruan hasil baru) ---
@@ -663,9 +671,9 @@ with tab_uji:
                 p = hasil["p"]
                 n_b, n_p = hasil.get("n_berisik"), hasil.get("n_pohon")
                 berisik = tentukan_vonis_model(p)
-                st.markdown(kartu_hasil_model(
+                _st_html(kartu_hasil_model(
                     model_klasifikasi, nama_audio, p, n_b, n_p, f, berisik
-                ), unsafe_allow_html=True)
+                ))
                 tampilkan_peringatan_sampel(audio_id, model_klasifikasi, berisik)
                 st.write("")
                 fig = buat_dashboard(
@@ -693,9 +701,9 @@ with tab_uji:
                 )
             else:
                 berisik = tentukan_vonis_rms(f["rms_dbfs"], ambang_rms_dbfs)
-                st.markdown(kartu_hasil_rms(
+                _st_html(kartu_hasil_rms(
                     nama_audio, f, berisik, ambang_rms_dbfs
-                ), unsafe_allow_html=True)
+                ))
                 tampilkan_peringatan_sampel(audio_id, metode_deteksi, berisik)
                 t = librosa.times_like(d["rms"], sr=sr, hop_length=HOP_LEN)
                 fig, ax = plt.subplots(figsize=(12, 3), facecolor=WARNA["gelap"])
@@ -756,6 +764,7 @@ with tab_riw:
 
 with tab_admin:
     st.subheader("Panel Admin & Monitoring Akustik")
+
     admin_pass = os.getenv("ADMIN_PASS")
     if not admin_pass:
         try:
@@ -767,13 +776,13 @@ with tab_admin:
         st.session_state.admin_terotentikasi = False
 
     if not st.session_state.admin_terotentikasi:
-        st.markdown("""
+        _st_html("""
         <div style="background:#131d33;border:1px solid #24324f;border-radius:14px;padding:26px;max-width:480px;margin:30px auto;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.4)">
             <div style="font-size:38px;margin-bottom:10px">🔒</div>
             <h3 style="color:#f8fafc;font-size:20px;margin-bottom:6px">Portal Administrator</h3>
             <p style="font-size:12px;color:#94a3b8;margin-bottom:18px">Masukkan kata sandi admin untuk mengakses metrik real-time, audit log, dan analitik mendalam.</p>
         </div>
-        """, unsafe_allow_html=True)
+        """)
         with st.form("form_login_admin"):
             input_pass = st.text_input("Kata Sandi Admin", type="password", placeholder="Masukkan kata sandi admin...")
             tbl_masuk = st.form_submit_button("Masuk ke Panel Admin", use_container_width=True)
@@ -877,8 +886,6 @@ with tab_admin:
                             </div>
                         </div>
                     </div>
-                    
-                    <!-- Digital VU Meter -->
                     <div style="margin-top:16px;max-width:560px">
                         <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px">
                             <span style="color:#94a3b8;font-weight:700">Digital VU Meter (Level Suara)</span>
@@ -911,30 +918,30 @@ with tab_admin:
                 terkini = ambil_status_terkini()
 
                 # Status Hero
-                st.markdown(_hero_status_html(terkini), unsafe_allow_html=True)
+                _st_html(_hero_status_html(terkini))
 
                 # 5 Metrik Ringkasan Utama
                 c1, c2, c3, c4, c5 = st.columns(5)
                 with c1:
-                    st.markdown(_kartu_kpi_html("Total Deteksi", stat.get("total", 0), "Keseluruhan sesi", "#3b82f6", "#3b82f6"), unsafe_allow_html=True)
+                    _st_html(_kartu_kpi_html("Total Deteksi", stat.get("total", 0), "Keseluruhan sesi", "#3b82f6", "#3b82f6"))
                 with c2:
-                    st.markdown(_kartu_kpi_html("Vonis Berisik", stat.get("berisik", 0), f"{stat.get('persen_berisik', 0)}% rasio", "#ef4444", "#ef4444"), unsafe_allow_html=True)
+                    _st_html(_kartu_kpi_html("Vonis Berisik", stat.get("berisik", 0), f"{stat.get('persen_berisik', 0)}% rasio", "#ef4444", "#ef4444"))
                 with c3:
-                    st.markdown(_kartu_kpi_html("Vonis Tenang", stat.get("tenang", 0), "Kondisi kondusif", "#10b981", "#10b981"), unsafe_allow_html=True)
+                    _st_html(_kartu_kpi_html("Vonis Tenang", stat.get("tenang", 0), "Kondisi kondusif", "#10b981", "#10b981"))
                 with c4:
-                    st.markdown(_kartu_kpi_html("Hari Ini", stat.get("hari_ini", 0), f"{stat.get('berisik_hari_ini', 0)} bising", "#f59e0b", "#f59e0b"), unsafe_allow_html=True)
+                    _st_html(_kartu_kpi_html("Hari Ini", stat.get("hari_ini", 0), f"{stat.get('berisik_hari_ini', 0)} bising", "#f59e0b", "#f59e0b"))
                 with c5:
-                    st.markdown(_kartu_kpi_html("Klien Aktif", stat.get("sesi_aktif", 0), "Sesi online aktif", "#06b6d4", "#06b6d4"), unsafe_allow_html=True)
+                    _st_html(_kartu_kpi_html("Klien Aktif", stat.get("sesi_aktif", 0), "Sesi online aktif", "#06b6d4", "#06b6d4"))
 
                 # 3 Metrik Sumber Audio
-                st.markdown('<div style="font-size:11px;font-weight:800;color:#94a3b8;text-transform:uppercase;letter-spacing:0.8px;margin:8px 0 10px 0">DISTRIBUSI DATA SUMBER AUDIO</div>', unsafe_allow_html=True)
+                _st_html('<div style="font-size:11px;font-weight:800;color:#94a3b8;text-transform:uppercase;letter-spacing:0.8px;margin:8px 0 10px 0">DISTRIBUSI DATA SUMBER AUDIO</div>')
                 s1, s2, s3 = st.columns(3)
                 with s1:
-                    st.markdown(_kartu_kpi_html("📡 Realtime WebRTC", stat.get("total_realtime", 0), "Streaming mikrofon langsung", "#06b6d4", "#06b6d4"), unsafe_allow_html=True)
+                    _st_html(_kartu_kpi_html("📡 Realtime WebRTC", stat.get("total_realtime", 0), "Streaming mikrofon langsung", "#06b6d4", "#06b6d4"))
                 with s2:
-                    st.markdown(_kartu_kpi_html("🎙️ Rekam Langsung", stat.get("total_rekam", 0), "Audio input rekaman suara", "#8b5cf6", "#8b5cf6"), unsafe_allow_html=True)
+                    _st_html(_kartu_kpi_html("🎙️ Rekam Langsung", stat.get("total_rekam", 0), "Audio input rekaman suara", "#8b5cf6", "#8b5cf6"))
                 with s3:
-                    st.markdown(_kartu_kpi_html("📁 Upload Berkas", stat.get("total_upload", 0), "Berkas rekaman diunggah", "#3b82f6", "#3b82f6"), unsafe_allow_html=True)
+                    _st_html(_kartu_kpi_html("📁 Upload Berkas", stat.get("total_upload", 0), "Berkas rekaman diunggah", "#3b82f6", "#3b82f6"))
 
                 # Grafik Live RMS Altair
                 st.markdown("#### 📈 Aliran Level Suara (dBFS) — 15 Menit Terakhir")
@@ -968,11 +975,11 @@ with tab_admin:
                 # 3 Kartu Ekstrem
                 e1, e2, e3 = st.columns(3)
                 with e1:
-                    st.markdown(_kartu_kpi_html("RMS Terkeras (Peak)", f"{eks.get('max_rms', '-')} dBFS", "Puncak energi sinyal", "#ef4444", "#ef4444"), unsafe_allow_html=True)
+                    _st_html(_kartu_kpi_html("RMS Terkeras (Peak)", f"{eks.get('max_rms', '-')} dBFS", "Puncak energi sinyal", "#ef4444", "#ef4444"))
                 with e2:
-                    st.markdown(_kartu_kpi_html("RMS Rata-Rata", f"{eks.get('avg_rms', '-')} dBFS", "Tingkat kebisingan umum", "#3b82f6", "#3b82f6"), unsafe_allow_html=True)
+                    _st_html(_kartu_kpi_html("RMS Rata-Rata", f"{eks.get('avg_rms', '-')} dBFS", "Tingkat kebisingan umum", "#3b82f6", "#3b82f6"))
                 with e3:
-                    st.markdown(_kartu_kpi_html("RMS Paling Hening", f"{eks.get('min_rms', '-')} dBFS", "Noise floor dasar", "#10b981", "#10b981"), unsafe_allow_html=True)
+                    _st_html(_kartu_kpi_html("RMS Paling Hening", f"{eks.get('min_rms', '-')} dBFS", "Noise floor dasar", "#10b981", "#10b981"))
 
                 st.divider()
 
@@ -1065,7 +1072,7 @@ with tab_admin:
                         </table>
                     </div>
                     """
-                    st.markdown(table_html, unsafe_allow_html=True)
+                    _st_html(table_html)
                 else:
                     st.caption("Belum ada data sumber audio.")
 
@@ -1127,7 +1134,7 @@ with tab_admin:
                         </table>
                     </div>
                     """
-                    st.markdown(table_riw, unsafe_allow_html=True)
+                    _st_html(table_riw)
 
                     # Tombol unduh CSV
                     df_adm_csv = pd.DataFrame(data_riwayat)
@@ -1190,7 +1197,7 @@ with tab_admin:
                         </table>
                     </div>
                     """
-                    st.markdown(table_sesi, unsafe_allow_html=True)
+                    _st_html(table_sesi)
                 else:
                     st.caption("Belum ada sesi tercatat di database.")
 
@@ -1201,7 +1208,7 @@ with tab_admin:
 
                 with col_m:
                     st.markdown("##### 🤖 Model Machine Learning Aktif")
-                    st.markdown("""
+                    _st_html("""
                     <div style="display:flex;flex-direction:column;gap:12px">
                         <div style="background:#131d33;border:1px solid #24324f;border-left:4px solid #3b82f6;border-radius:10px;padding:14px">
                             <div style="font-weight:800;color:#3b82f6;font-size:14px">🌲 Random Forest Classifier</div>
@@ -1216,14 +1223,14 @@ with tab_admin:
                             <div style="color:#94a3b8;font-size:11px;margin-top:3px">Akurasi Validasi Silang: <b>78.79%</b> · C=2.0 · Kernel RBF · RobustScaler (IQR)</div>
                         </div>
                     </div>
-                    """, unsafe_allow_html=True)
+                    """)
 
                 with col_db:
                     st.markdown("##### 🗄️ Kesehatan Server & Database")
                     db_path_val = sis.get("db_path", "—")
                     db_size_val = f"{sis.get('db_size_kb', 0)} KB"
                     db_rows_val = f"{sis.get('total_deteksi', 0)} baris"
-                    st.markdown(f"""
+                    _st_html(f"""
                     <div style="background:#131d33;border:1px solid #24324f;border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:10px;font-size:13px">
                         <div style="display:flex;justify-content:space-between;border-bottom:1px solid #24324f;padding-bottom:8px">
                             <span style="color:#94a3b8">Status Server:</span>
@@ -1246,12 +1253,12 @@ with tab_admin:
                             <span style="color:#06b6d4;font-weight:700">WebSocket + HTTP Fallback</span>
                         </div>
                     </div>
-                    """, unsafe_allow_html=True)
+                    """)
 
                 st.divider()
 
                 # Regulasi Standar Kebisingan
-                st.markdown("""
+                _st_html("""
                 <div style="background:#131d33;border:1px solid #24324f;border-radius:12px;padding:18px">
                     <h5 style="color:#f8fafc;margin-bottom:8px">📜 Regulasi Ambang Batas Kebisingan Ruangan</h5>
                     <div style="font-size:12px;line-height:1.7;color:#94a3b8">
@@ -1263,4 +1270,4 @@ with tab_admin:
                         </ul>
                     </div>
                 </div>
-                """, unsafe_allow_html=True)
+                """)
