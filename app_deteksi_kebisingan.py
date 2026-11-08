@@ -22,7 +22,9 @@ import secrets
 from datetime import datetime
 from deteksi_logger import (
     inisialisasi_db, log_deteksi, daftar_sesi, hapus_sesi_mati,
-    ambil_riwayat, ambil_status_terkini, ambil_data_grafik, hitung_statistik
+    ambil_riwayat, ambil_status_terkini, ambil_data_grafik, hitung_statistik,
+    ambil_riwayat_terfilter, ambil_analisis_mendalam, ambil_daftar_sesi,
+    bersihkan_sesi_manual, ambil_status_sistem
 )
 
 st.set_page_config(page_title="Deteksi Kebisingan Ruangan", layout="wide")
@@ -775,9 +777,11 @@ with tab_admin:
                 else:
                     st.error("Kata sandi salah. Akses ditolak.")
     else:
-        kol_judul, kol_keluar = st.columns([5, 1])
+        kol_judul, kol_link, kol_keluar = st.columns([4, 2, 1])
         with kol_judul:
             st.success("Terkoneksi sebagai Administrator.")
+        with kol_link:
+            st.link_button("🚀 Buka Dashboard Web (Port 8000)", url="http://localhost:8000", help="Buka dashboard standalone realtime di tab browser baru")
         with kol_keluar:
             if st.button("Keluar", key="tbl_keluar_admin"):
                 st.session_state.admin_terotentikasi = False
@@ -785,63 +789,125 @@ with tab_admin:
 
         st.divider()
 
-        # Statistik global dari SQLite
-        stat = hitung_statistik()
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Pengguna Aktif (Sesi)", stat.get("sesi_aktif", 0))
-        m2.metric("Total Deteksi", stat.get("total", 0))
-        m3.metric(
-            "Terdeteksi Berisik",
-            f"{stat.get('berisik', 0)} ({stat.get('persen_berisik', 0)}%)"
-        )
-        m4.metric(
-            "Deteksi Hari Ini",
-            f"{stat.get('hari_ini', 0)} ({stat.get('berisik_hari_ini', 0)} bising)"
-        )
+        sub_live, sub_analisis, sub_riwayat, sub_sesi, sub_sistem = st.tabs([
+            "📡 Live Monitoring",
+            "📊 Analisis & Statistik",
+            "📋 Audit Log & Ekspor",
+            "👥 Sesi Pengguna",
+            "⚙️ Status Sistem & Model"
+        ])
 
-        st.markdown("### Status Deteksi Terkini")
-        terkini = ambil_status_terkini()
-        if terkini:
-            warna_vonis = WARNA["berisik"] if terkini["vonis"] == "BERISIK" else WARNA["tenang"]
-            st.markdown(
-                f"""
-                <div style="background:{WARNA['panel']};border-left:6px solid {warna_vonis};padding:14px 18px;border-radius:8px;margin-bottom:15px">
-                    <div style="font-size:12px;color:{WARNA['redup']}">WAKTU: {terkini['timestamp']} · SUMBER: {terkini['sumber']} · METODE: {terkini['metode']}</div>
-                    <div style="font-size:24px;font-weight:700;color:{warna_vonis};margin:4px 0">{terkini['vonis']}</div>
-                    <div style="font-size:13px;color:{WARNA['teks']}">
-                        Level RMS: <b>{f"{terkini['rms_dbfs']:.1f} dBFS" if terkini['rms_dbfs'] is not None else "-"}</b> |
-                        Probabilitas: <b>{f"{terkini['p_berisik']:.3f}" if terkini['p_berisik'] is not None else "-"}</b> |
-                        Berkas: <i>{terkini['nama_file'] or 'Mikrofon / Realtime'}</i>
+        with sub_live:
+            stat = hitung_statistik()
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Pengguna Aktif (Sesi)", stat.get("sesi_aktif", 0))
+            m2.metric("Total Deteksi", stat.get("total", 0))
+            m3.metric("Terdeteksi Berisik", f"{stat.get('berisik', 0)} ({stat.get('persen_berisik', 0)}%)")
+            m4.metric("Deteksi Hari Ini", f"{stat.get('hari_ini', 0)} ({stat.get('berisik_hari_ini', 0)} bising)")
+
+            st.markdown("#### Status Deteksi Terkini")
+            terkini = ambil_status_terkini()
+            if terkini:
+                warna_vonis = WARNA["berisik"] if terkini["vonis"] == "BERISIK" else WARNA["tenang"]
+                st.markdown(
+                    f"""
+                    <div style="background:{WARNA['panel']};border-left:6px solid {warna_vonis};padding:14px 18px;border-radius:8px;margin-bottom:15px">
+                        <div style="font-size:12px;color:{WARNA['redup']}">WAKTU: {terkini['timestamp']} · SUMBER: {terkini['sumber']} · METODE: {terkini['metode']}</div>
+                        <div style="font-size:24px;font-weight:700;color:{warna_vonis};margin:4px 0">{terkini['vonis']}</div>
+                        <div style="font-size:13px;color:{WARNA['teks']}">
+                            Level RMS: <b>{f"{terkini['rms_dbfs']:.1f} dBFS" if terkini['rms_dbfs'] is not None else "-"}</b> |
+                            Probabilitas: <b>{f"{terkini['p_berisik']:.3f}" if terkini['p_berisik'] is not None else "-"}</b> |
+                            Berkas: <i>{terkini['nama_file'] or 'Mikrofon / Realtime'}</i>
+                        </div>
                     </div>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-        else:
-            st.info("Belum ada data deteksi yang tercatat di database.")
+                    """,
+                    unsafe_allow_html=True
+                )
+            else:
+                st.info("Belum ada data deteksi yang tercatat di database.")
 
-        st.markdown("### Grafik Level Suara (RMS dBFS)")
-        data_grafik = ambil_data_grafik(menit=15)
-        if data_grafik:
-            df_grafik = pd.DataFrame(data_grafik)
-            if "timestamp" in df_grafik.columns and "rms_dbfs" in df_grafik.columns:
-                df_grafik["waktu"] = df_grafik["timestamp"].apply(lambda x: x.split(" ")[-1] if " " in str(x) else str(x))
-                st.line_chart(df_grafik.set_index("waktu")["rms_dbfs"], use_container_width=True)
-        else:
-            st.caption("Belum ada data level suara dalam 15 menit terakhir.")
+            st.markdown("#### Grafik Level Suara (RMS dBFS) — 15 Menit Terakhir")
+            data_grafik = ambil_data_grafik(menit=15)
+            if data_grafik:
+                df_grafik = pd.DataFrame(data_grafik)
+                if "timestamp" in df_grafik.columns and "rms_dbfs" in df_grafik.columns:
+                    df_grafik["waktu"] = df_grafik["timestamp"].apply(lambda x: x.split(" ")[-1] if " " in str(x) else str(x))
+                    st.line_chart(df_grafik.set_index("waktu")["rms_dbfs"], width="stretch")
+            else:
+                st.caption("Belum ada data level suara dalam 15 menit terakhir.")
 
-        st.markdown("### Riwayat Global Deteksi (Database SQLite)")
-        limit_data = st.selectbox("Jumlah baris data yang ditampilkan", [50, 100, 200, 500], index=1)
-        data_riwayat = ambil_riwayat(limit=limit_data)
-        if data_riwayat:
-            df_admin = pd.DataFrame(data_riwayat)
-            st.dataframe(df_admin, use_container_width=True)
-            csv_data = df_admin.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                "📥 Unduh Seluruh Log Deteksi (CSV)",
-                data=csv_data,
-                file_name=f"log_deteksi_kebisingan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv",
-            )
-        else:
-            st.write("Belum ada riwayat deteksi di database.")
+        with sub_analisis:
+            analisis = ambil_analisis_mendalam()
+            eks = analisis.get("ekstrem", {})
+            e1, e2, e3 = st.columns(3)
+            e1.metric("Peak RMS Terkeras", f"{eks.get('max_rms', '-')} dBFS")
+            e2.metric("Rata-rata RMS", f"{eks.get('avg_rms', '-')} dBFS")
+            e3.metric("Noise Floor Terendah", f"{eks.get('min_rms', '-')} dBFS")
+
+            st.divider()
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown("##### ⏰ Pola Kebisingan per Jam (24 Jam)")
+                jam_data = analisis.get("per_jam", [])
+                if jam_data:
+                    df_jam = pd.DataFrame(jam_data).set_index("jam")
+                    st.bar_chart(df_jam[["berisik", "total"]], width="stretch")
+                else:
+                    st.caption("Belum ada data per jam.")
+            with c2:
+                st.markdown("##### 🤖 Komparasi Metode Klasifikasi")
+                met_data = analisis.get("per_metode", [])
+                if met_data:
+                    df_met = pd.DataFrame(met_data).set_index("metode")
+                    st.bar_chart(df_met[["berisik", "tenang"]], width="stretch")
+                else:
+                    st.caption("Belum ada data metode.")
+
+        with sub_riwayat:
+            f1, f2, f3 = st.columns([1, 1, 2])
+            with f1:
+                f_vonis = st.selectbox("Filter Vonis", ["Semua", "BERISIK", "TIDAK BERISIK"], key="adm_f_vonis")
+            with f2:
+                f_metode = st.selectbox("Filter Metode", ["Semua", "Random Forest", "KNN", "SVM", "RMS"], key="adm_f_metode")
+            with f3:
+                f_q = st.text_input("Cari file / sesi ID", placeholder="Ketik kata kunci...", key="adm_f_q")
+
+            data_riwayat = ambil_riwayat_terfilter(limit=100, vonis=f_vonis, metode=f_metode, query=f_q)
+            if data_riwayat:
+                df_admin = pd.DataFrame(data_riwayat)
+                st.dataframe(df_admin, width="stretch")
+                csv_data = df_admin.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    "📥 Unduh Hasil Filter (CSV)",
+                    data=csv_data,
+                    file_name=f"log_kebisingan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                )
+            else:
+                st.info("Tidak ada data riwayat yang cocok dengan filter.")
+
+        with sub_sesi:
+            st.markdown("#### Sesi Klien Streamlit")
+            kol_s1, kol_s2 = st.columns([4, 1])
+            with kol_s2:
+                if st.button("🧹 Bersihkan Sesi Mati", key="btn_bersihkan_sesi_st"):
+                    bersihkan_sesi_manual()
+                    st.success("Sesi tidak aktif dibersihkan.")
+                    st.rerun()
+
+            sesi_list = ambil_daftar_sesi()
+            if sesi_list:
+                st.dataframe(pd.DataFrame(sesi_list), width="stretch")
+            else:
+                st.caption("Belum ada sesi tercatat.")
+
+        with sub_sistem:
+            sis = ambil_status_sistem()
+            st.markdown("#### Informasi Kesehatan Database & Model")
+            st.json(sis)
+            st.markdown("""
+            ##### Rujukan Standar Kebisingan Ruangan:
+            - **Zona Sunyi (< -30 dBFS / < 55 dBA)**: Perpustakaan, ruang rapat, ruang konsentrasi.
+            - **Zona Waspada (-30 s.d. -20 dBFS / 55 - 70 dBA)**: Percakapan aktif, aktivitas normal.
+            - **Zona Berisik (> -20 dBFS / > 85 dBA)**: Kegaduhan tinggi, peringatan diaktifkan.
+            """)
