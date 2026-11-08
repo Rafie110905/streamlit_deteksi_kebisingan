@@ -84,3 +84,4 @@ def _st_html(html_str: str):
    - Skrip pengujian `test_sanitizer.py` memvalidasi bahwa blok multiline berindentasi 24 spasi dan komentar HTML tereduksi sempurna menjadi token datar tanpa indentasi awal.
 5. **Zero-Trust Security Pentest**:
    - Endpoint admin `/api/status` dan `/embed` tetap menolak akses tanpa token (401 Unauthorized), menjamin tidak ada regresi keamanan.
+

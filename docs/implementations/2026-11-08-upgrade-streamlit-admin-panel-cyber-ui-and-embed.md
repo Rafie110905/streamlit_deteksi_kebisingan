@@ -84,3 +84,4 @@ Kami menghadirkan solusi komprehensif dua arah:
 3. Pengguna dapat memilih:
    - **🎨 Tampilan Native Cyber HD**: Menikmati antarmuka gelap beresolusi tinggi dengan VU Meter dan grafik interaktif Altair.
    - **🌐 Portal Dashboard Standalone (Embedded Live WS)**: Menikmati portal FastAPI lengkap dengan animasi VU meter real-time dan koneksi streaming WebSocket 1 detik tanpa perlu membuka tab peramban baru.
+

@@ -48,6 +48,68 @@ def _st_html(html_str: str):
     st.markdown(clean, unsafe_allow_html=True)
 
 
+def _banner_status_realtime(is_on: bool, pesan_tambahan: str = "", nomor_hasil: int = 0, waktu_str: str = "") -> str:
+    """Menampilkan banner status deteksi realtime (ON atau OFF) secara eksplisit dan kontras."""
+    if is_on:
+        info_bawah = ""
+        if nomor_hasil or waktu_str:
+            info_bawah = f"""
+            <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(16,185,129,0.25);font-size:11px;color:#94a3b8;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
+                <span>⏱️ Pembaruan ke-<b>{nomor_hasil}</b> (Pukul {waktu_str})</span>
+                <span style="color:#6ee7b7">Tekan tombol merah <b>STOP</b> di atas untuk mematikan</span>
+            </div>
+            """
+        sub_text = pesan_tambahan or "Mikrofon aktif mendengarkan kebisingan ruangan. Hasil analisis diperbarui otomatis setiap detik."
+        return f"""
+        <div style="background:linear-gradient(90deg,#071a12 0%,#0c2e20 100%);border:1px solid #10b981;border-left:6px solid #10b981;border-radius:12px;padding:14px 20px;margin:12px 0;box-shadow:0 0 20px rgba(16,185,129,0.18)">
+            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+                <div style="display:flex;align-items:center;gap:12px">
+                    <span style="display:inline-block;width:14px;height:14px;border-radius:50%;background:#10b981;box-shadow:0 0 12px #10b981"></span>
+                    <div>
+                        <div style="font-size:16px;font-weight:900;color:#34d399;letter-spacing:0.8px;display:flex;align-items:center;gap:8px">
+                            STATUS REALTIME: ON (AKTIF BERJALAN)
+                            <span style="font-size:10px;background:#064e3b;color:#6ee7b7;padding:2px 8px;border-radius:10px;border:1px solid #10b981;font-weight:800">● LIVE MIKROFON</span>
+                        </div>
+                        <div style="font-size:12px;color:#a7f3d0;margin-top:3px">
+                            {sub_text}
+                        </div>
+                    </div>
+                </div>
+                <div style="background:#064e3b;color:#34d399;font-size:12px;font-weight:900;padding:6px 14px;border-radius:20px;border:1px solid #10b981;letter-spacing:0.5px;box-shadow:0 0 10px rgba(16,185,129,0.3)">
+                    🟢 POSISI ON
+                </div>
+            </div>
+            {info_bawah}
+        </div>
+        """
+    else:
+        sub_text = pesan_tambahan or "Mikrofon saat ini mati dan <b>tidak</b> sedang mendengarkan atau merekam suara ruangan Anda."
+        return f"""
+        <div style="background:#13151b;border:1px solid #3f3f46;border-left:6px solid #ef4444;border-radius:12px;padding:16px 20px;margin:12px 0;box-shadow:0 4px 16px rgba(0,0,0,0.35)">
+            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+                <div style="display:flex;align-items:center;gap:12px">
+                    <span style="display:inline-block;width:14px;height:14px;border-radius:50%;background:#ef4444;box-shadow:0 0 10px rgba(239,68,68,0.5)"></span>
+                    <div>
+                        <div style="font-size:16px;font-weight:900;color:#f87171;letter-spacing:0.8px;display:flex;align-items:center;gap:8px">
+                            STATUS REALTIME: OFF (NONAKTIF / MATI)
+                            <span style="font-size:10px;background:#450a0a;color:#fca5a5;padding:2px 8px;border-radius:10px;border:1px solid #ef4444;font-weight:800">TERHENTI</span>
+                        </div>
+                        <div style="font-size:12px;color:#cbd5e1;margin-top:3px">
+                            {sub_text}
+                        </div>
+                    </div>
+                </div>
+                <div style="background:rgba(239,68,68,0.18);color:#fca5a5;font-size:12px;font-weight:900;padding:6px 14px;border-radius:20px;border:1px solid rgba(239,68,68,0.5)">
+                    🔴 POSISI OFF
+                </div>
+            </div>
+            <div style="margin-top:12px;padding-top:10px;border-top:1px solid #27272a;font-size:12px;color:#94a3b8">
+                👉 <b>Cara Mengaktifkan:</b> Klik tombol <b style="color:#ef4444">START</b> pada widget kontrol di atas dan izinkan akses mikrofon di peramban Anda untuk memulai analisis realtime.
+            </div>
+        </div>
+        """
+
+
 def cari_audio_peringatan():
     base_dir = os.path.dirname(os.path.abspath(__file__))
     format_audio = {
@@ -299,6 +361,9 @@ def kartu_hasil_model(model_name, nama, p, n_berisik, n_pohon, f, berisik):
     ragu = abs(p - .5) < .10
     warna = WARNA["ragu"] if ragu else WARNA["berisik"] if berisik else WARNA["tenang"]
     teks = "BERISIK" if berisik else "TIDAK BERISIK"
+    badge_realtime = ""
+    if "realtime" in str(nama).lower():
+        badge_realtime = ' <span style="background:#064e3b;color:#34d399;font-size:10px;font-weight:800;padding:2px 8px;border-radius:10px;border:1px solid #10b981;margin-left:6px;letter-spacing:0.5px">● ON LIVE</span>'
     kotak = lambda k, v, s="": (f"<div style='background:{WARNA['panel']};padding:8px 10px;border-radius:8px'>"
                                  f"<div style='color:{WARNA['redup']};font-size:10px'>{k}</div><b>{v}</b>"
                                  f"<div style='color:{WARNA['redup']};font-size:10px'>{s}</div></div>")
@@ -306,7 +371,7 @@ def kartu_hasil_model(model_name, nama, p, n_berisik, n_pohon, f, berisik):
     <div style="background:{WARNA['gelap']};color:{WARNA['teks']};padding:20px 24px;border-radius:14px;
                 border-left:8px solid {warna};border:1px solid #334155;border-left:8px solid {warna};font-family:'Segoe UI',Arial,sans-serif">
       <div>
-        <div style="font-size:11px;letter-spacing:2px;color:{WARNA['redup']}">{model_name.upper()} · {nama}</div>
+        <div style="font-size:11px;letter-spacing:2px;color:{WARNA['redup']}">{model_name.upper()} · {nama.upper()}{badge_realtime}</div>
         <div style="font-size:32px;font-weight:800;color:{warna};margin-top:4px">{teks}</div>
         <div style="font-size:13px;color:{WARNA['redup']}">Keyakinan model: <b style="color:{WARNA['teks']}">{tingkat_keyakinan(p)}</b></div>
       </div>
@@ -332,10 +397,13 @@ def kartu_hasil_model(model_name, nama, p, n_berisik, n_pohon, f, berisik):
 def kartu_hasil_rms(nama, f, berisik, ambang_rms_dbfs):
     warna = WARNA["berisik"] if berisik else WARNA["tenang"]
     teks = "BERISIK" if berisik else "TIDAK BERISIK"
+    badge_realtime = ""
+    if "realtime" in str(nama).lower():
+        badge_realtime = ' <span style="background:#064e3b;color:#34d399;font-size:10px;font-weight:800;padding:2px 8px;border-radius:10px;border:1px solid #10b981;margin-left:6px;letter-spacing:0.5px">● ON LIVE</span>'
     return f"""
     <div style="background:{WARNA['gelap']};color:{WARNA['teks']};padding:20px 24px;border-radius:14px;
                 border:1px solid #334155;border-left:8px solid {warna};font-family:'Segoe UI',Arial,sans-serif">
-      <div style="font-size:11px;letter-spacing:2px;color:{WARNA['redup']}">METODE RMS · {nama}</div>
+      <div style="font-size:11px;letter-spacing:2px;color:{WARNA['redup']}">METODE RMS · {nama.upper()}{badge_realtime}</div>
       <div style="font-size:32px;font-weight:800;color:{warna};margin-top:4px">{teks}</div>
       <div style="margin-top:10px;font-size:14px">
         RMS: <b>{f['rms_dbfs']:.1f} dBFS</b> · Ambang: <b>{ambang_rms_dbfs:.1f} dBFS</b>
@@ -514,7 +582,14 @@ with tab_uji:
     if sumber_audio == "Deteksi realtime":
         from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
 
-        st.caption("Tekan START dan izinkan mikrofon. Hasil diperbarui setiap detik dari 2 detik suara terakhir.")
+        _st_html("""
+        <div style="background:#0e1726;border:1px solid #1e293b;border-radius:10px;padding:12px 16px;margin:6px 0 10px 0;font-size:12px;color:#94a3b8;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+            <div>
+                🎙️ <b>Kontrol Mikrofon Realtime:</b> Gunakan tombol di bawah — tekan <b style="color:#ef4444">START</b> untuk menyalakan pemantauan suara langsung (ON), atau <b style="color:#ef4444">STOP</b> untuk mematikan (OFF).
+            </div>
+            <div style="font-size:11px;color:#64748b">Jendela analisis geser 2 detik</div>
+        </div>
+        """)
         st.session_state.hasil_audio = None
         state_audio = st.session_state.audio_langsung
 
@@ -556,19 +631,31 @@ with tab_uji:
             if not webrtc_ctx.state.playing:
                 st.session_state.peringatan_realtime_aktif = False
                 st.session_state.peringatan_realtime_autoplay_diputar = False
-                st.info("Tekan START untuk mulai mendeteksi melalui mikrofon. Tekan STOP untuk mengakhiri.")
+                _st_html(_banner_status_realtime(False))
                 return
             if error_live:
                 st.error(f"Gagal menganalisis audio langsung: {error_live}")
             if hasil_live is None:
                 if jumlah_frame:
-                    st.info("Audio diterima. Menunggu 1 detik suara untuk prediksi pertama…")
+                    _st_html(_banner_status_realtime(
+                        True,
+                        "Mikrofon telah terhubung! Sedang mengumpulkan 1 detik sampel suara awal untuk kalkulasi pertama…",
+                        0, ""
+                    ))
                 else:
-                    st.warning("Belum menerima audio. Periksa izin mikrofon dan perangkat input di browser.")
+                    _st_html(_banner_status_realtime(
+                        True,
+                        "Menunggu aliran data suara mikrofon dari peramban. Periksa izin mikrofon dan perangkat input audio.",
+                        0, ""
+                    ))
                 return
 
             _waktu_sekarang = datetime.now().strftime("%H:%M:%S")
             fitur_live = hasil_live["fitur"]
+
+            # Banner status eksplisit Realtime ON
+            _st_html(_banner_status_realtime(True, "", nomor_hasil, _waktu_sekarang))
+
             if metode_deteksi == "Model klasifikasi":
                 p_live = hasil_live["p"]
                 berisik_live = tentukan_vonis_model(p_live)
@@ -578,7 +665,7 @@ with tab_uji:
                     fitur_live, berisik_live,
                 ))
                 st.caption(
-                    f"🟢 **Live** ({_waktu_sekarang}) · Pembaruan ke-{nomor_hasil} · "
+                    f"🟢 **STATUS: REALTIME ON (AKTIF)** ({_waktu_sekarang}) · Pembaruan ke-{nomor_hasil} · "
                     f"RMS: {fitur_live['rms_dbfs']:.1f} dBFS · "
                     f"P(berisik): {p_live:.3f} · {model_klasifikasi}"
                 )
@@ -587,7 +674,7 @@ with tab_uji:
                 _st_html(kartu_hasil_rms(
                     "Deteksi realtime", fitur_live, berisik_live, ambang_rms_dbfs
                 ))
-                st.caption(f"🟢 **Live** ({_waktu_sekarang}) · Pembaruan ke-{nomor_hasil} · Mode RMS.")
+                st.caption(f"🟢 **STATUS: REALTIME ON (AKTIF)** ({_waktu_sekarang}) · Pembaruan ke-{nomor_hasil} · Mode RMS.")
 
             # --- Log hasil realtime ke SQLite (hanya saat ada pembaruan hasil baru) ---
             if st.session_state.get("_terakhir_nomor_hasil_dilog") != nomor_hasil:
