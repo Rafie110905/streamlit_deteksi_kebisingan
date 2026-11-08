@@ -122,7 +122,7 @@ def ambil_riwayat(limit: int = 100):
 
 
 def ambil_status_terkini():
-    """Ambil 1 baris deteksi terbaru."""
+    """Ambil 1 baris deteksi terbaru beserta metadata keaktifan streaming realtime."""
     with _lock:
         try:
             conn = _koneksi()
@@ -130,7 +130,50 @@ def ambil_status_terkini():
                 "SELECT * FROM deteksi ORDER BY id DESC LIMIT 1"
             ).fetchone()
             conn.close()
-            return dict(row) if row else None
+            if not row:
+                return None
+            data = dict(row)
+
+            # Hitung selisih detik dari waktu saat ini
+            try:
+                t_row = datetime.strptime(data["timestamp"], "%Y-%m-%d %H:%M:%S")
+                detik_lalu = int((datetime.now() - t_row).total_seconds())
+                if detik_lalu < 0:
+                    detik_lalu = 0
+            except Exception:
+                detik_lalu = 999999
+
+            data["detik_lalu"] = detik_lalu
+
+            if detik_lalu <= 3:
+                data["keterangan_waktu"] = "Baru saja"
+            elif detik_lalu < 60:
+                data["keterangan_waktu"] = f"{detik_lalu} detik lalu"
+            elif detik_lalu < 3600:
+                data["keterangan_waktu"] = f"{detik_lalu // 60} menit lalu"
+            elif detik_lalu < 86400:
+                data["keterangan_waktu"] = f"{detik_lalu // 3600} jam lalu"
+            else:
+                data["keterangan_waktu"] = f"{detik_lalu // 86400} hari lalu"
+
+            is_realtime_sumber = "realtime" in str(data.get("sumber", "")).lower()
+            data["is_realtime_sumber"] = is_realtime_sumber
+
+            # Ambang batas toleransi: 6 detik untuk streaming WebRTC aktif
+            if is_realtime_sumber and detik_lalu <= 6:
+                data["is_live"] = True
+                data["status_aliran"] = "LIVE_AKTIF"
+                data["status_teks"] = "REALTIME AKTIF (ON)"
+            elif is_realtime_sumber:
+                data["is_live"] = False
+                data["status_aliran"] = "REALTIME_TERHENTI"
+                data["status_teks"] = "REALTIME NONAKTIF (DATA LAMA)"
+            else:
+                data["is_live"] = False
+                data["status_aliran"] = "NON_REALTIME"
+                data["status_teks"] = f"UJI SAMPEL ({data.get('sumber', 'MANUAL')})"
+
+            return data
         except Exception:
             return None
 
@@ -180,6 +223,13 @@ def hitung_statistik():
                 "SELECT COUNT(*) FROM deteksi WHERE sumber LIKE '%Upload%' OR sumber LIKE '%Unggah%'"
             ).fetchone()[0]
 
+            from datetime import timedelta
+            limit_stream = (datetime.now() - timedelta(seconds=6)).strftime("%Y-%m-%d %H:%M:%S")
+            total_streamer_aktif = conn.execute(
+                "SELECT COUNT(DISTINCT sesi_id) FROM deteksi WHERE sumber LIKE '%Realtime%' AND timestamp >= ?",
+                (limit_stream,)
+            ).fetchone()[0]
+
             conn.close()
             return {
                 "total": total,
@@ -192,6 +242,8 @@ def hitung_statistik():
                 "total_realtime": total_realtime,
                 "total_rekam": total_rekam,
                 "total_upload": total_upload,
+                "realtime_streaming_aktif": total_streamer_aktif > 0,
+                "total_streamer_aktif": total_streamer_aktif,
                 "sumber": {
                     "realtime": total_realtime,
                     "rekam": total_rekam,

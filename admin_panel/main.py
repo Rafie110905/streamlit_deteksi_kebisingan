@@ -354,14 +354,18 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       <!-- Status Hero Card -->
       <div class="hero-status kosong" id="hero-card">
         <div>
-          <div style="font-size:12px;letter-spacing:2px;color:var(--text-sub);margin-bottom:6px;font-weight:700">STATUS AKUSTIK TERKINI</div>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap">
+            <span style="font-size:12px;letter-spacing:2px;color:var(--text-sub);font-weight:700">STATUS AKUSTIK TERKINI</span>
+            <span id="hero-live-badge" style="font-size:11px;font-weight:800;padding:2px 10px;border-radius:12px;display:none"></span>
+          </div>
           <div class="hero-title" id="hero-vonis">—</div>
           <div style="font-size:13px;color:var(--text-sub);margin-top:6px" id="hero-meta">Menghubungkan ke sensor audio…</div>
+          <div style="font-size:12px;margin-top:4px" id="hero-status-note"></div>
           
           <!-- Sound Level Meter (VU Meter) -->
           <div class="vu-container">
             <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px">
-              <span>Digital VU Meter</span>
+              <span id="vu-label-text">Digital VU Meter</span>
               <b id="vu-val-text">— dBFS</b>
             </div>
             <div class="vu-bar-wrap">
@@ -422,7 +426,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <div class="card-metric" style="border-left: 4px solid var(--cyan)">
           <div class="lbl">📡 Realtime WebRTC</div>
           <div class="val" style="color:var(--cyan)" id="m-src-realtime">—</div>
-          <div class="sub">Streaming mikrofon browser langsung</div>
+          <div class="sub" id="m-src-realtime-sub">Streaming mikrofon browser langsung</div>
         </div>
         <div class="card-metric" style="border-left: 4px solid var(--ungu)">
           <div class="lbl">🎙️ Rekam Langsung</div>
@@ -921,6 +925,43 @@ function applyLivePayload(d) {
       + (st.p_berisik !== null ? ` · P=${fmt(st.p_berisik, 3)}` : '');
     heroKey.textContent = st.keyakinan || (st.p_berisik !== null ? (st.p_berisik >= 0.7 ? 'SANGAT YAKIN' : 'CENDERUNG') : 'STANDAR');
 
+    // Penanda Status Realtime ON vs Data Lama / Terhenti
+    const liveBadge = document.getElementById('hero-live-badge');
+    const statusNote = document.getElementById('hero-status-note');
+    const vuLabel = document.getElementById('vu-label-text');
+
+    if (liveBadge) {
+      liveBadge.style.display = 'inline-block';
+      if (st.is_live) {
+        liveBadge.textContent = '🟢 LIVE STREAMING AKTIF (REALTIME ON)';
+        liveBadge.style.background = 'rgba(16, 185, 129, 0.2)';
+        liveBadge.style.color = 'var(--hijau)';
+        liveBadge.style.border = '1px solid var(--hijau)';
+        if (statusNote) {
+          statusNote.innerHTML = `<span style="color:var(--hijau);font-weight:700">● Mikrofon Klien Sedang Siaran Langsung (${st.keterangan_waktu || 'Baru saja'})</span>`;
+        }
+        if (vuLabel) vuLabel.textContent = 'Digital VU Meter (Aliran Audio Live)';
+      } else if (st.status_aliran === 'REALTIME_TERHENTI') {
+        liveBadge.textContent = '🔴 REALTIME NONAKTIF (DATA LAMA)';
+        liveBadge.style.background = 'rgba(239, 68, 68, 0.18)';
+        liveBadge.style.color = 'var(--merah)';
+        liveBadge.style.border = '1px solid var(--merah)';
+        if (statusNote) {
+          statusNote.innerHTML = `<span style="color:var(--merah);font-weight:700">⚠️ Mikrofon Klien Telah Mati — Menampilkan Rekaman Terakhir (${st.keterangan_waktu || 'Terhenti'})</span>`;
+        }
+        if (vuLabel) vuLabel.textContent = 'Digital VU Meter (Level Terakhir — Mikrofon Nonaktif)';
+      } else {
+        liveBadge.textContent = `📁 DATA UJI SAMPEL (${st.sumber || 'File'})`;
+        liveBadge.style.background = 'rgba(59, 130, 246, 0.18)';
+        liveBadge.style.color = 'var(--biru)';
+        liveBadge.style.border = '1px solid var(--biru)';
+        if (statusNote) {
+          statusNote.innerHTML = `<span style="color:var(--text-sub)">Pengujian sampel selesai (${st.keterangan_waktu || 'Manual'}). Tidak ada streaming realtime.</span>`;
+        }
+        if (vuLabel) vuLabel.textContent = `Digital VU Meter (Level Uji Sampel ${st.sumber || ''})`;
+      }
+    }
+
     // VU Meter (Level Bar)
     const vuBar = document.getElementById('vu-bar');
     const vuText = document.getElementById('vu-val-text');
@@ -952,6 +993,17 @@ function applyLivePayload(d) {
     setText('m-src-realtime', stat.total_realtime ?? (stat.sumber ? stat.sumber.realtime : '0'));
     setText('m-src-rekam', stat.total_rekam ?? (stat.sumber ? stat.sumber.rekam : '0'));
     setText('m-src-upload', stat.total_upload ?? (stat.sumber ? stat.sumber.upload : '0'));
+
+    const rtSub = document.getElementById('m-src-realtime-sub');
+    if (rtSub) {
+      if (stat.realtime_streaming_aktif) {
+        rtSub.textContent = '🟢 Klien Aktif Siaran (Live)';
+        rtSub.style.color = 'var(--hijau)';
+      } else {
+        rtSub.textContent = '🔴 Tidak Ada Siaran Aktif (Idle)';
+        rtSub.style.color = 'var(--text-sub)';
+      }
+    }
   }
 
   setText('txt-last-sync', d.server_time ? d.server_time.substring(11, 19) : '');

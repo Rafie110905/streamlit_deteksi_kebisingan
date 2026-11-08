@@ -954,17 +954,53 @@ with tab_admin:
                 p_str = f" · P={terkini_data['p_berisik']:.3f}" if terkini_data.get("p_berisik") is not None else ""
                 file_str = f" · File: {terkini_data.get('nama_file')}" if terkini_data.get("nama_file") else ""
 
+                # --- Analisis Keaktifan Realtime vs Data Lama ---
+                is_live = bool(terkini_data.get("is_live", False))
+                status_aliran = str(terkini_data.get("status_aliran", ""))
+                ket_waktu = str(terkini_data.get("keterangan_waktu", ""))
+
+                if is_live:
+                    badge_aliran = """
+                    <div style="background:#064e3b;color:#34d399;font-size:11px;font-weight:900;padding:4px 12px;border-radius:20px;border:1px solid #10b981;box-shadow:0 0 10px rgba(16,185,129,0.4);display:inline-flex;align-items:center;gap:6px">
+                        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#10b981"></span>
+                        🟢 LIVE STREAMING AKTIF (REALTIME ON)
+                    </div>
+                    """
+                    info_status_teks = f'<span style="color:#34d399;font-weight:700">● Mikrofon Klien Sedang Siaran Langsung ({ket_waktu})</span>'
+                    vu_title = "Digital VU Meter (Aliran Audio Live)"
+                elif status_aliran == "REALTIME_TERHENTI":
+                    badge_aliran = """
+                    <div style="background:rgba(239,68,68,0.18);color:#fca5a5;font-size:11px;font-weight:900;padding:4px 12px;border-radius:20px;border:1px solid rgba(239,68,68,0.5);display:inline-flex;align-items:center;gap:6px">
+                        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444"></span>
+                        🔴 REALTIME NONAKTIF (DATA LAMA / TERHENTI)
+                    </div>
+                    """
+                    info_status_teks = f'<span style="color:#f87171;font-weight:700">⚠️ Mikrofon Klien Tidak Aktif — Menampilkan Data Rekaman Terakhir ({ket_waktu})</span>'
+                    vu_title = "Digital VU Meter (Level Terakhir — Mikrofon Pengguna Saat Ini Nonaktif)"
+                else:
+                    badge_aliran = f"""
+                    <div style="background:rgba(59,130,246,0.18);color:#93c5fd;font-size:11px;font-weight:900;padding:4px 12px;border-radius:20px;border:1px solid rgba(59,130,246,0.5);display:inline-flex;align-items:center;gap:6px">
+                        📁 DATA UJI SAMPEL ({terkini_data.get('sumber', 'MANUAL')})
+                    </div>
+                    """
+                    info_status_teks = f'<span style="color:#94a3b8">Pengujian sampel berkas/rekaman ({ket_waktu}). Tidak ada streaming aktif.</span>'
+                    vu_title = f"Digital VU Meter (Level Hasil Uji Sampel {terkini_data.get('sumber', '')})"
+
                 return f"""
                 <div style="background:linear-gradient(90deg, {bg_grad} 0%, #131d33 70%);border:1px solid #24324f;border-left:8px solid {w_vonis};border-radius:14px;padding:22px 26px;margin-bottom:20px">
                     <div style="display:flex;justify-content:space-between;align-items:flex-start">
                         <div>
-                            <div style="font-size:11px;letter-spacing:1.5px;color:#94a3b8;font-weight:800;text-transform:uppercase">STATUS AKUSTIK TERKINI</div>
+                            <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap">
+                                <span style="font-size:11px;letter-spacing:1.5px;color:#94a3b8;font-weight:800;text-transform:uppercase">STATUS AKUSTIK TERKINI</span>
+                                {badge_aliran}
+                            </div>
                             <div style="font-size:38px;font-weight:900;color:{w_vonis};text-shadow:0 0 20px {shadow};line-height:1.2;margin:4px 0">{terkini_data.get('vonis')}</div>
                             <div style="font-size:12px;color:#cbd5e1;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
                                 <span>{terkini_data.get('timestamp')}</span> · 
                                 {badge_sumber} · 
                                 <span><b>{terkini_data.get('metode')}</b>{p_str}{file_str}</span>
                             </div>
+                            <div style="font-size:12px;margin-top:6px">{info_status_teks}</div>
                         </div>
                         <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:8px">
                             <div style="width:18px;height:18px;border-radius:50%;background:{w_vonis};box-shadow:0 0 16px {shadow}"></div>
@@ -975,7 +1011,7 @@ with tab_admin:
                     </div>
                     <div style="margin-top:16px;max-width:560px">
                         <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px">
-                            <span style="color:#94a3b8;font-weight:700">Digital VU Meter (Level Suara)</span>
+                            <span style="color:#94a3b8;font-weight:700">{vu_title}</span>
                             <b style="color:#f8fafc">{db_val:.1f} dBFS</b>
                         </div>
                         <div style="height:14px;background:#070d1a;border-radius:7px;border:1px solid #24324f;overflow:hidden">
@@ -1024,7 +1060,8 @@ with tab_admin:
                 _st_html('<div style="font-size:11px;font-weight:800;color:#94a3b8;text-transform:uppercase;letter-spacing:0.8px;margin:8px 0 10px 0">DISTRIBUSI DATA SUMBER AUDIO</div>')
                 s1, s2, s3 = st.columns(3)
                 with s1:
-                    _st_html(_kartu_kpi_html("📡 Realtime WebRTC", stat.get("total_realtime", 0), "Streaming mikrofon langsung", "#06b6d4", "#06b6d4"))
+                    sub_rt = "🟢 Klien Aktif Siaran (Live)" if stat.get("realtime_streaming_aktif") else "🔴 Tidak Ada Siaran Aktif (Idle)"
+                    _st_html(_kartu_kpi_html("📡 Realtime WebRTC", stat.get("total_realtime", 0), sub_rt, "#06b6d4", "#06b6d4"))
                 with s2:
                     _st_html(_kartu_kpi_html("🎙️ Rekam Langsung", stat.get("total_rekam", 0), "Audio input rekaman suara", "#8b5cf6", "#8b5cf6"))
                 with s3:
