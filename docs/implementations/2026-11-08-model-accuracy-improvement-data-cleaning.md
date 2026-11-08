@@ -68,3 +68,4 @@ Semua model mengalami peningkatan akurasi signifikan di atas 78%, dengan model u
    - Penyetelan parameter KNN ($k=13$, metrik Manhattan) dan SVM ($C=2.0$, RobustScaler).
    - Pembaruan informasi detail model pada panel samping (*sidebar*) antarmuka Streamlit.
 4. `docs/implementations/2026-11-08-model-accuracy-improvement-data-cleaning.md`: Dokumentasi implementasi resmi.
+

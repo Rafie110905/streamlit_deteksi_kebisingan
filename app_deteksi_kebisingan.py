@@ -148,6 +148,17 @@ def ekstrak_fitur_sinyal(y, sr):
     return f, y, sr, d
 
 
+def _hangatkan_numba():
+    try:
+        dummy_y = np.zeros(FRAME_LEN * 2, dtype=np.float32)
+        ekstrak_fitur_sinyal(dummy_y, 48000)
+    except Exception:
+        pass
+
+
+_hangatkan_numba()
+
+
 class PenyanggaAudioLangsung:
     def __init__(self):
         self._lock = threading.Lock()
@@ -198,6 +209,7 @@ class PenyanggaAudioLangsung:
                 self._jumlah_sampel += data.size
                 self._sampel_sejak_prediksi += data.size
 
+                ukuran_min = int(sr * 1.0)
                 ukuran_jendela = int(sr * 2)
                 while self._jumlah_sampel > ukuran_jendela:
                     lebih = self._jumlah_sampel - ukuran_jendela
@@ -209,8 +221,8 @@ class PenyanggaAudioLangsung:
                         self._potongan[0] = awal[lebih:]
                         self._jumlah_sampel -= lebih
 
-                if (self._jumlah_sampel < ukuran_jendela
-                        or self._sampel_sejak_prediksi < sr):
+                if (self._jumlah_sampel < ukuran_min
+                        or self._sampel_sejak_prediksi < int(sr * 0.8)):
                     return
                 y = np.concatenate(tuple(self._potongan))
                 self._sampel_sejak_prediksi = 0
@@ -538,11 +550,12 @@ with tab_uji:
                 st.error(f"Gagal menganalisis audio langsung: {error_live}")
             if hasil_live is None:
                 if jumlah_frame:
-                    st.info("Audio diterima. Menunggu 2 detik suara untuk prediksi pertama…")
+                    st.info("Audio diterima. Menunggu 1 detik suara untuk prediksi pertama…")
                 else:
                     st.warning("Belum menerima audio. Periksa izin mikrofon dan perangkat input di browser.")
                 return
 
+            _waktu_sekarang = datetime.now().strftime("%H:%M:%S")
             fitur_live = hasil_live["fitur"]
             if metode_deteksi == "Model klasifikasi":
                 p_live = hasil_live["p"]
@@ -553,29 +566,32 @@ with tab_uji:
                     fitur_live, berisik_live,
                 ), unsafe_allow_html=True)
                 st.caption(
+                    f"🟢 **Live** ({_waktu_sekarang}) · Pembaruan ke-{nomor_hasil} · "
                     f"RMS: {fitur_live['rms_dbfs']:.1f} dBFS · "
-                    f"P(berisik): {p_live:.3f} · {model_klasifikasi} · Pembaruan ke-{nomor_hasil}"
+                    f"P(berisik): {p_live:.3f} · {model_klasifikasi}"
                 )
             else:
                 berisik_live = tentukan_vonis_rms(fitur_live["rms_dbfs"], ambang_rms_dbfs)
                 st.markdown(kartu_hasil_rms(
                     "Deteksi realtime", fitur_live, berisik_live, ambang_rms_dbfs
                 ), unsafe_allow_html=True)
-                st.caption(f"Pembaruan ke-{nomor_hasil} · RMS tidak menggunakan model Random Forest.")
+                st.caption(f"🟢 **Live** ({_waktu_sekarang}) · Pembaruan ke-{nomor_hasil} · Mode RMS.")
 
-            # --- Log hasil realtime ke SQLite ---
-            _met_rt = model_klasifikasi if metode_deteksi == "Model klasifikasi" else "RMS"
-            _p_rt = p_live if metode_deteksi == "Model klasifikasi" else None
-            _key_rt = tingkat_keyakinan(p_live) if metode_deteksi == "Model klasifikasi" else None
-            log_deteksi(
-                sumber="Realtime WebRTC",
-                metode=_met_rt,
-                vonis="BERISIK" if berisik_live else "TIDAK BERISIK",
-                p_berisik=_p_rt,
-                rms_dbfs=fitur_live.get("rms_dbfs"),
-                keyakinan=_key_rt,
-                sesi_id=_sesi_id,
-            )
+            # --- Log hasil realtime ke SQLite (hanya saat ada pembaruan hasil baru) ---
+            if st.session_state.get("_terakhir_nomor_hasil_dilog") != nomor_hasil:
+                st.session_state["_terakhir_nomor_hasil_dilog"] = nomor_hasil
+                _met_rt = model_klasifikasi if metode_deteksi == "Model klasifikasi" else "RMS"
+                _p_rt = p_live if metode_deteksi == "Model klasifikasi" else None
+                _key_rt = tingkat_keyakinan(p_live) if metode_deteksi == "Model klasifikasi" else None
+                log_deteksi(
+                    sumber="Realtime WebRTC",
+                    metode=_met_rt,
+                    vonis="BERISIK" if berisik_live else "TIDAK BERISIK",
+                    p_berisik=_p_rt,
+                    rms_dbfs=fitur_live.get("rms_dbfs"),
+                    keyakinan=_key_rt,
+                    sesi_id=_sesi_id,
+                )
 
             if berisik_live:
                 autoplay = (
@@ -594,7 +610,7 @@ with tab_uji:
                 if autoplay:
                     st.session_state.peringatan_realtime_autoplay_diputar = True
                 st.session_state.peringatan_realtime_aktif = True
-            elif not berisik_live:
+            else:
                 st.session_state.peringatan_realtime_aktif = False
                 st.session_state.peringatan_realtime_autoplay_diputar = False
 
