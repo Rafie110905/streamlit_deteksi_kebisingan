@@ -1,0 +1,38 @@
+services:
+
+  # ── Aplikasi Streamlit Deteksi Kebisingan ─────────────────────────────────
+  deteksi-kebisingan:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: deteksi-kebisingan:latest
+    ports:
+      - "8011:8501"
+    volumes:
+      # Berbagi database SQLite antara Streamlit dan Admin Panel
+      - noise_data:/app/data
+    environment:
+      - DB_DIR=/app/data
+    restart: unless-stopped
+
+  # ── Admin Panel (FastAPI) ─────────────────────────────────────────────────
+  admin-panel:
+    build:
+      context: .
+      dockerfile: admin_panel/Dockerfile
+    image: admin-kebisingan:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      # Berbagi database SQLite yang sama
+      - noise_data:/app/data
+    environment:
+      - DB_DIR=/app/data
+      - ADMIN_USER=${ADMIN_USER:-admin}
+      - ADMIN_PASS=${ADMIN_PASS:-admin123}
+    restart: unless-stopped
+    depends_on:
+      - deteksi-kebisingan
+
+volumes:
+  noise_data:
