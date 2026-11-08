@@ -16,10 +16,13 @@ from sklearn.model_selection import StratifiedGroupKFold, cross_val_predict
 from sklearn.metrics import accuracy_score
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, RobustScaler
 from sklearn.svm import SVC
+import secrets
+from datetime import datetime
 from deteksi_logger import (
-    inisialisasi_db, log_deteksi, daftar_sesi, hapus_sesi_mati
+    inisialisasi_db, log_deteksi, daftar_sesi, hapus_sesi_mati,
+    ambil_riwayat, ambil_status_terkini, ambil_data_grafik, hitung_statistik
 )
 
 st.set_page_config(page_title="Deteksi Kebisingan Ruangan", layout="wide")
@@ -58,19 +61,19 @@ def buat_model(nama_model):
     if nama_model == "KNN":
         return Pipeline([
             ("scaler", StandardScaler()),
-            ("classifier", KNeighborsClassifier(n_neighbors=5, weights="distance")),
+            ("classifier", KNeighborsClassifier(n_neighbors=13, weights="distance", metric="manhattan")),
         ])
     if nama_model == "SVM":
         return Pipeline([
-            ("scaler", StandardScaler()),
+            ("scaler", RobustScaler()),
             ("classifier", SVC(
-                kernel="rbf", probability=True, class_weight="balanced",
+                C=2.0, kernel="rbf", probability=True,
                 random_state=SEED,
             )),
         ])
     if nama_model == "Random Forest":
         return RandomForestClassifier(
-            n_estimators=300, class_weight="balanced", random_state=SEED, n_jobs=-1
+            n_estimators=300, random_state=SEED, n_jobs=-1
         )
     raise ValueError(f"Model klasifikasi tidak dikenal: {nama_model}")
 
@@ -177,8 +180,11 @@ class PenyanggaAudioLangsung:
             else:
                 data = data.astype(np.float32, copy=False)
             if data.ndim > 1:
-                data = data.mean(axis=0)
-            data = np.nan_to_num(data, copy=False)
+                if data.shape[0] in (1, 2) and data.shape[1] > data.shape[0]:
+                    data = data.mean(axis=0)
+                else:
+                    data = data.mean(axis=-1)
+            data = np.nan_to_num(data, copy=False).astype(np.float32).ravel()
             sr = frame.sample_rate
             if not sr or data.size == 0:
                 return
@@ -272,24 +278,13 @@ def kartu_hasil_model(model_name, nama, p, n_berisik, n_pohon, f, berisik):
     kotak = lambda k, v, s="": (f"<div style='background:{WARNA['panel']};padding:8px 10px;border-radius:8px'>"
                                  f"<div style='color:{WARNA['redup']};font-size:10px'>{k}</div><b>{v}</b>"
                                  f"<div style='color:{WARNA['redup']};font-size:10px'>{s}</div></div>")
-    ringkasan_model = ""
-    if n_berisik is not None and n_pohon is not None:
-        ringkasan_model = f"""
-        <div style="text-align:right">
-          <div style="font-size:11px;color:{WARNA['redup']}">SUARA POHON (MODEL)</div>
-          <div style="font-size:32px;font-weight:800">{n_berisik}<span style="font-size:15px;color:{WARNA['redup']}"> / {n_pohon}</span></div>
-          <div style="font-size:11px;color:{WARNA['redup']}">memilih BERISIK</div>
-        </div>"""
     return f"""
     <div style="background:{WARNA['gelap']};color:{WARNA['teks']};padding:20px 24px;border-radius:14px;
                 border-left:8px solid {warna};border:1px solid #334155;border-left:8px solid {warna};font-family:'Segoe UI',Arial,sans-serif">
-      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px">
-        <div>
-          <div style="font-size:11px;letter-spacing:2px;color:{WARNA['redup']}">{model_name.upper()} · {nama}</div>
-          <div style="font-size:32px;font-weight:800;color:{warna};margin-top:4px">{teks}</div>
-          <div style="font-size:13px;color:{WARNA['redup']}">Keyakinan model: <b style="color:{WARNA['teks']}">{tingkat_keyakinan(p)}</b></div>
-        </div>
-        {ringkasan_model}
+      <div>
+        <div style="font-size:11px;letter-spacing:2px;color:{WARNA['redup']}">{model_name.upper()} · {nama}</div>
+        <div style="font-size:32px;font-weight:800;color:{warna};margin-top:4px">{teks}</div>
+        <div style="font-size:13px;color:{WARNA['redup']}">Keyakinan model: <b style="color:{WARNA['teks']}">{tingkat_keyakinan(p)}</b></div>
       </div>
       <div style="margin-top:16px">
         <div style="display:flex;justify-content:space-between;font-size:11px;color:{WARNA['redup']}">
@@ -428,8 +423,8 @@ with st.sidebar:
         st.metric("Akurasi validasi silang", f"{akurasi_cv * 100:.1f}%")
         detail_model = (
             "300 pohon" if model_klasifikasi == "Random Forest"
-            else "5 tetangga" if model_klasifikasi == "KNN"
-            else "kernel RBF"
+            else "13 tetangga (Manhattan)" if model_klasifikasi == "KNN"
+            else "kernel RBF (RobustScaler)"
         )
         st.caption(f"{model_klasifikasi} · {detail_model} · {len(kolom)} fitur · {n_data} data latih. "
                    "Validasi 5-fold dikelompokkan per mahasiswa.")
@@ -454,7 +449,8 @@ if "peringatan_realtime_aktif" not in st.session_state:
     st.session_state.peringatan_realtime_aktif = False
 
 # Daftarkan sesi ini ke DB agar admin bisa pantau jumlah pengguna aktif
-_sesi_id = st.runtime.scriptrunner.get_script_run_ctx().session_id
+_ctx = st.runtime.scriptrunner.get_script_run_ctx()
+_sesi_id = _ctx.session_id if _ctx is not None else "sesi_lokal"
 daftar_sesi(_sesi_id)
 hapus_sesi_mati(batas_detik=90)
 
@@ -467,7 +463,7 @@ elif st.session_state.konfigurasi_model_aktif != konfigurasi_model:
     st.session_state.peringatan_realtime_aktif = False
     st.session_state.konfigurasi_model_aktif = konfigurasi_model
 
-tab_uji, tab_riw = st.tabs(["Uji Sampel", "Riwayat"])
+tab_uji, tab_riw, tab_admin = st.tabs(["Uji Sampel", "Riwayat Sesi", "🔒 Panel Admin"])
 
 with tab_uji:
     if metode_deteksi == "RMS":
@@ -492,7 +488,7 @@ with tab_uji:
         nama_audio = "Rekaman langsung.wav" if audio is not None else ""
 
     if sumber_audio == "Deteksi realtime":
-        from streamlit_webrtc import webrtc_streamer
+        from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
 
         st.caption("Tekan START dan izinkan mikrofon. Hasil diperbarui setiap detik dari 2 detik suara terakhir.")
         st.session_state.hasil_audio = None
@@ -505,11 +501,29 @@ with tab_uji:
                 state_audio.proses_frame(frame, None, None)
             return frame
 
+        # Konfigurasi STUN/TURN agar WebRTC dapat bertukar paket audio di NAT, Docker, & Cloud
+        ice_servers = [
+            {"urls": ["stun:stun.l.google.com:19302"]},
+            {"urls": ["stun:stun1.l.google.com:19302"]},
+            {"urls": ["stun:stun2.l.google.com:19302"]},
+            {"urls": ["stun:stun.cloudflare.com:3478"]},
+        ]
+        try:
+            if "turn" in st.secrets:
+                ice_servers.append(dict(st.secrets["turn"]))
+        except Exception:
+            pass
+
+        rtc_config = RTCConfiguration({"iceServers": ice_servers})
+
         webrtc_ctx = webrtc_streamer(
             key=f"deteksi-kebisingan-realtime-{metode_deteksi}-{model_klasifikasi}",
+            mode=WebRtcMode.SENDONLY,
+            rtc_configuration=rtc_config,
             audio_frame_callback=callback_audio,
             media_stream_constraints={"audio": True, "video": False},
             sendback_audio=False,
+            async_processing=True,
         )
 
         @st.fragment(run_every="1s")
@@ -718,3 +732,100 @@ with tab_riw:
             st.session_state.riwayat = []; st.rerun()
     else:
         st.write("Belum ada pengujian.")
+
+
+with tab_admin:
+    st.subheader("Panel Admin & Monitoring")
+    admin_pass = os.getenv("ADMIN_PASS")
+    if not admin_pass:
+        try:
+            admin_pass = st.secrets.get("ADMIN_PASS", "admin123")
+        except Exception:
+            admin_pass = "admin123"
+
+    if "admin_terotentikasi" not in st.session_state:
+        st.session_state.admin_terotentikasi = False
+
+    if not st.session_state.admin_terotentikasi:
+        st.caption("Akses dibatasi khusus administrator.")
+        with st.form("form_login_admin"):
+            input_pass = st.text_input("Kata Sandi Admin", type="password", placeholder="Masukkan kata sandi admin...")
+            tbl_masuk = st.form_submit_button("Masuk ke Panel Admin")
+            if tbl_masuk:
+                if secrets.compare_digest(input_pass.encode("utf-8"), str(admin_pass).encode("utf-8")):
+                    st.session_state.admin_terotentikasi = True
+                    st.success("Autentikasi berhasil!")
+                    st.rerun()
+                else:
+                    st.error("Kata sandi salah. Akses ditolak.")
+    else:
+        kol_judul, kol_keluar = st.columns([5, 1])
+        with kol_judul:
+            st.success("Terkoneksi sebagai Administrator.")
+        with kol_keluar:
+            if st.button("Keluar", key="tbl_keluar_admin"):
+                st.session_state.admin_terotentikasi = False
+                st.rerun()
+
+        st.divider()
+
+        # Statistik global dari SQLite
+        stat = hitung_statistik()
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Pengguna Aktif (Sesi)", stat.get("sesi_aktif", 0))
+        m2.metric("Total Deteksi", stat.get("total", 0))
+        m3.metric(
+            "Terdeteksi Berisik",
+            f"{stat.get('berisik', 0)} ({stat.get('persen_berisik', 0)}%)"
+        )
+        m4.metric(
+            "Deteksi Hari Ini",
+            f"{stat.get('hari_ini', 0)} ({stat.get('berisik_hari_ini', 0)} bising)"
+        )
+
+        st.markdown("### Status Deteksi Terkini")
+        terkini = ambil_status_terkini()
+        if terkini:
+            warna_vonis = WARNA["berisik"] if terkini["vonis"] == "BERISIK" else WARNA["tenang"]
+            st.markdown(
+                f"""
+                <div style="background:{WARNA['panel']};border-left:6px solid {warna_vonis};padding:14px 18px;border-radius:8px;margin-bottom:15px">
+                    <div style="font-size:12px;color:{WARNA['redup']}">WAKTU: {terkini['timestamp']} · SUMBER: {terkini['sumber']} · METODE: {terkini['metode']}</div>
+                    <div style="font-size:24px;font-weight:700;color:{warna_vonis};margin:4px 0">{terkini['vonis']}</div>
+                    <div style="font-size:13px;color:{WARNA['teks']}">
+                        Level RMS: <b>{f"{terkini['rms_dbfs']:.1f} dBFS" if terkini['rms_dbfs'] is not None else "-"}</b> |
+                        Probabilitas: <b>{f"{terkini['p_berisik']:.3f}" if terkini['p_berisik'] is not None else "-"}</b> |
+                        Berkas: <i>{terkini['nama_file'] or 'Mikrofon / Realtime'}</i>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+        else:
+            st.info("Belum ada data deteksi yang tercatat di database.")
+
+        st.markdown("### Grafik Level Suara (RMS dBFS)")
+        data_grafik = ambil_data_grafik(menit=15)
+        if data_grafik:
+            df_grafik = pd.DataFrame(data_grafik)
+            if "timestamp" in df_grafik.columns and "rms_dbfs" in df_grafik.columns:
+                df_grafik["waktu"] = df_grafik["timestamp"].apply(lambda x: x.split(" ")[-1] if " " in str(x) else str(x))
+                st.line_chart(df_grafik.set_index("waktu")["rms_dbfs"], use_container_width=True)
+        else:
+            st.caption("Belum ada data level suara dalam 15 menit terakhir.")
+
+        st.markdown("### Riwayat Global Deteksi (Database SQLite)")
+        limit_data = st.selectbox("Jumlah baris data yang ditampilkan", [50, 100, 200, 500], index=1)
+        data_riwayat = ambil_riwayat(limit=limit_data)
+        if data_riwayat:
+            df_admin = pd.DataFrame(data_riwayat)
+            st.dataframe(df_admin, use_container_width=True)
+            csv_data = df_admin.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "📥 Unduh Seluruh Log Deteksi (CSV)",
+                data=csv_data,
+                file_name=f"log_deteksi_kebisingan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+            )
+        else:
+            st.write("Belum ada riwayat deteksi di database.")
