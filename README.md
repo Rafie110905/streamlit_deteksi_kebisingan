@@ -2,6 +2,9 @@
 
 Aplikasi Streamlit untuk menganalisis rekaman audio dan memperkirakan apakah suara ruangan **berisik** atau **tidak berisik**. Audio bisa diunggah atau direkam langsung melalui mikrofon browser.
 
+Link app : https://psd-deteksi-kebisingan.streamlit.app/
+
+
 ## Fitur
 
 - Menerima audio `.mp3`, `.wav`, `.m4a`, `.flac`, dan `.ogg`.
