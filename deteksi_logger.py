@@ -168,6 +168,18 @@ def hitung_statistik():
                 "SELECT COUNT(*) FROM deteksi WHERE vonis='BERISIK' AND DATE(timestamp)=DATE('now','localtime')"
             ).fetchone()[0]
             sesi = conn.execute("SELECT COUNT(*) FROM sesi_aktif").fetchone()[0]
+
+            # Rincian per sumber deteksi
+            total_realtime = conn.execute(
+                "SELECT COUNT(*) FROM deteksi WHERE sumber LIKE '%Realtime%'"
+            ).fetchone()[0]
+            total_rekam = conn.execute(
+                "SELECT COUNT(*) FROM deteksi WHERE sumber LIKE '%Rekam%'"
+            ).fetchone()[0]
+            total_upload = conn.execute(
+                "SELECT COUNT(*) FROM deteksi WHERE sumber LIKE '%Upload%' OR sumber LIKE '%Unggah%'"
+            ).fetchone()[0]
+
             conn.close()
             return {
                 "total": total,
@@ -177,13 +189,27 @@ def hitung_statistik():
                 "berisik_hari_ini": berisik_hari_ini,
                 "sesi_aktif": sesi,
                 "persen_berisik": round(berisik / total * 100, 1) if total else 0,
+                "total_realtime": total_realtime,
+                "total_rekam": total_rekam,
+                "total_upload": total_upload,
+                "sumber": {
+                    "realtime": total_realtime,
+                    "rekam": total_rekam,
+                    "upload": total_upload,
+                },
             }
         except Exception:
             return {}
 
 
-def ambil_riwayat_terfilter(limit: int = 50, vonis: str = None, metode: str = None, query: str = None):
-    """Ambil riwayat deteksi dengan filter dan pencarian untuk log viewer."""
+def ambil_riwayat_terfilter(
+    limit: int = 50,
+    vonis: str = None,
+    metode: str = None,
+    query: str = None,
+    sumber: str = None,
+):
+    """Ambil riwayat deteksi dengan filter vonis, metode, sumber, dan pencarian."""
     with _lock:
         try:
             conn = _koneksi()
@@ -195,6 +221,17 @@ def ambil_riwayat_terfilter(limit: int = 50, vonis: str = None, metode: str = No
             if metode and metode not in ("Semua", "All", ""):
                 sql += " AND metode = ?"
                 params.append(metode)
+            if sumber and sumber not in ("Semua", "All", ""):
+                s_lower = sumber.lower()
+                if "realtime" in s_lower:
+                    sql += " AND sumber LIKE '%Realtime%'"
+                elif "rekam" in s_lower:
+                    sql += " AND sumber LIKE '%Rekam%'"
+                elif "upload" in s_lower or "unggah" in s_lower:
+                    sql += " AND (sumber LIKE '%Upload%' OR sumber LIKE '%Unggah%')"
+                else:
+                    sql += " AND sumber = ?"
+                    params.append(sumber)
             if query and query.strip():
                 sql += " AND (nama_file LIKE ? OR sesi_id LIKE ? OR sumber LIKE ?)"
                 q = f"%{query.strip()}%"
@@ -224,13 +261,28 @@ def ambil_analisis_mendalam():
                 GROUP BY metode
             """).fetchall()
 
-            # 2. Distribusi per Sumber
+            # 2. Distribusi per Sumber (distandarisasi ke 3 kategori utama)
             sumber_rows = conn.execute("""
-                SELECT sumber,
-                       COUNT(*) as total,
-                       SUM(CASE WHEN vonis='BERISIK' THEN 1 ELSE 0 END) as berisik
+                SELECT 
+                    CASE 
+                        WHEN sumber LIKE '%Realtime%' THEN 'Realtime WebRTC'
+                        WHEN sumber LIKE '%Rekam%' THEN 'Rekam Langsung'
+                        WHEN sumber LIKE '%Upload%' OR sumber LIKE '%Unggah%' THEN 'Upload Berkas'
+                        ELSE sumber 
+                    END as sumber,
+                    COUNT(*) as total,
+                    SUM(CASE WHEN vonis='BERISIK' THEN 1 ELSE 0 END) as berisik,
+                    SUM(CASE WHEN vonis='TIDAK BERISIK' THEN 1 ELSE 0 END) as tenang,
+                    ROUND(AVG(rms_dbfs), 1) as avg_rms
                 FROM deteksi
-                GROUP BY sumber
+                GROUP BY 
+                    CASE 
+                        WHEN sumber LIKE '%Realtime%' THEN 'Realtime WebRTC'
+                        WHEN sumber LIKE '%Rekam%' THEN 'Rekam Langsung'
+                        WHEN sumber LIKE '%Upload%' OR sumber LIKE '%Unggah%' THEN 'Upload Berkas'
+                        ELSE sumber 
+                    END
+                ORDER BY total DESC
             """).fetchall()
 
             # 3. Distribusi per Jam (24 jam)

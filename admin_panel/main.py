@@ -71,10 +71,11 @@ def api_riwayat(
     limit: int = Query(50, ge=1, le=500),
     vonis: str = Query("Semua"),
     metode: str = Query("Semua"),
+    sumber: str = Query("Semua"),
     query: str = Query("")
 ):
-    """Riwayat deteksi dengan filter dan pencarian."""
-    data = ambil_riwayat_terfilter(limit=limit, vonis=vonis, metode=metode, query=query)
+    """Riwayat deteksi dengan filter vonis, metode, sumber, dan pencarian."""
+    data = ambil_riwayat_terfilter(limit=limit, vonis=vonis, metode=metode, query=query, sumber=sumber)
     return JSONResponse({"data": data, "total": len(data)})
 
 
@@ -251,6 +252,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   .badge-online  { background: rgba(16,185,129,.18); color: var(--hijau); border: 1px solid rgba(16,185,129,.3); }
   .badge-idle    { background: rgba(245,158,11,.18); color: var(--kuning); border: 1px solid rgba(245,158,11,.3); }
   .badge-offline { background: rgba(148,163,184,.15); color: var(--text-sub); border: 1px solid rgba(148,163,184,.3); }
+  .badge-src-realtime { background: rgba(6,182,212,.18); color: var(--cyan); border: 1px solid rgba(6,182,212,.35); }
+  .badge-src-rekam    { background: rgba(139,92,246,.18); color: var(--ungu); border: 1px solid rgba(139,92,246,.35); }
+  .badge-src-upload   { background: rgba(59,130,246,.18); color: var(--biru); border: 1px solid rgba(59,130,246,.35); }
   
   /* Toggle Switch */
   .switch { position: relative; display: inline-block; width: 38px; height: 20px; }
@@ -384,6 +388,28 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         </div>
       </div>
 
+      <!-- Breakdown Rincian Berdasarkan Sumber Audio -->
+      <div style="margin-bottom:12px;font-size:11px;font-weight:700;color:var(--text-sub);text-transform:uppercase;letter-spacing:.8px">
+        DISTRIBUSI DATA BERDASARKAN SUMBER AUDIO
+      </div>
+      <div class="grid-metrics" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom: 24px;">
+        <div class="card-metric" style="border-left: 4px solid var(--cyan)">
+          <div class="lbl">📡 Realtime WebRTC</div>
+          <div class="val" style="color:var(--cyan)" id="m-src-realtime">—</div>
+          <div class="sub">Streaming mikrofon browser langsung</div>
+        </div>
+        <div class="card-metric" style="border-left: 4px solid var(--ungu)">
+          <div class="lbl">🎙️ Rekam Langsung</div>
+          <div class="val" style="color:var(--ungu)" id="m-src-rekam">—</div>
+          <div class="sub">Audio input rekaman suara pengguna</div>
+        </div>
+        <div class="card-metric" style="border-left: 4px solid var(--biru)">
+          <div class="lbl">📁 Upload Berkas</div>
+          <div class="val" style="color:var(--biru)" id="m-src-upload">—</div>
+          <div class="sub">Berkas MP3/WAV/FLAC diunggah</div>
+        </div>
+      </div>
+
       <!-- Live Line Chart -->
       <div class="card-panel">
         <div class="card-panel-header">
@@ -454,11 +480,35 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <!-- Chart 4: Proporsi Sumber -->
         <div class="card-panel">
           <div class="card-panel-header">
-            <h3>🎙️ Distribusi Sumber Audio</h3>
+            <h3>🎙️ Komparasi Kebisingan per Sumber Audio</h3>
           </div>
           <div style="position:relative;height:240px">
             <canvas id="chart-sumber"></canvas>
           </div>
+        </div>
+      </div>
+
+      <!-- Tabel Komparasi Karakteristik Sumber Audio -->
+      <div class="card-panel">
+        <div class="card-panel-header">
+          <h3>📊 Karakteristik Akustik Berdasarkan Sumber Audio</h3>
+        </div>
+        <div class="table-responsive">
+          <table>
+            <thead>
+              <tr>
+                <th>Sumber Audio</th>
+                <th>Total Pengujian</th>
+                <th>Vonis Berisik</th>
+                <th>Vonis Tenang</th>
+                <th>Rasio Berisik (%)</th>
+                <th>Rata-rata RMS (dBFS)</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-analisis-sumber">
+              <tr><td colspan="6" style="text-align:center;padding:16px;color:var(--text-sub)">Memuat data sumber audio…</td></tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -470,7 +520,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         
         <div class="table-tools">
           <div class="filter-group">
-            <label style="font-size:11px;color:var(--text-sub);font-weight:700">VONIS:</label>
+            <label style="font-size:11px;color:var(--text-sub);font-weight:700">SUMBER:</label>
+            <select class="input-control" id="f-sumber" onchange="muatRiwayat()">
+              <option value="Semua">Semua Sumber</option>
+              <option value="Realtime WebRTC">📡 Realtime WebRTC</option>
+              <option value="Rekam Langsung">🎙️ Rekam Langsung</option>
+              <option value="Upload Berkas">📁 Upload Berkas</option>
+            </select>
+
+            <label style="font-size:11px;color:var(--text-sub);font-weight:700;margin-left:6px">VONIS:</label>
             <select class="input-control" id="f-vonis" onchange="muatRiwayat()">
               <option value="Semua">Semua Vonis</option>
               <option value="BERISIK">Berisik Saja</option>
@@ -768,22 +826,41 @@ function initChartKeyakinan(labels, data) {
 
 // 5. Sumber Chart
 let chartSumber = null;
-function initChartSumber(labels, data) {
+function initChartSumber(labels, berisik, tenang) {
   const ctx = document.getElementById('chart-sumber').getContext('2d');
   if (chartSumber) chartSumber.destroy();
   chartSumber = new Chart(ctx, {
-    type: 'pie',
+    type: 'bar',
     data: {
       labels: labels,
-      datasets: [{ data: data, backgroundColor: [COLOR_PURPLE, COLOR_BLUE, COLOR_YELLOW], borderWidth: 2, borderColor: '#131d33' }]
+      datasets: [
+        { label: 'Berisik', data: berisik, backgroundColor: COLOR_RED, borderRadius: 4 },
+        { label: 'Tenang', data: tenang, backgroundColor: COLOR_GREEN, borderRadius: 4 }
+      ]
     },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: '#f8fafc' } } } }
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: { x: { ticks: { color: '#94a3b8' } }, y: { ticks: { color: '#94a3b8' }, grid: { color: '#24324f' } } },
+      plugins: { legend: { labels: { color: '#f8fafc' } } }
+    }
   });
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 function setText(id, text) { const el = document.getElementById(id); if (el) el.textContent = text; }
 function fmt(val, dec=1) { return (val === null || val === undefined) ? '—' : parseFloat(val).toFixed(dec); }
+
+function formatSumberBadge(sumber) {
+  if (!sumber) return '—';
+  if (sumber.includes('Realtime')) {
+    return '<span class="badge badge-src-realtime">📡 Realtime WebRTC</span>';
+  } else if (sumber.includes('Rekam')) {
+    return '<span class="badge badge-src-rekam">🎙️ Rekam Langsung</span>';
+  } else if (sumber.includes('Upload') || sumber.includes('Unggah')) {
+    return '<span class="badge badge-src-upload">📁 Upload Berkas</span>';
+  }
+  return `<span class="badge">${sumber}</span>`;
+}
 
 // ── Update Live Monitoring UI ──────────────────────────────────────────────
 let lastVonis = null;
@@ -835,6 +912,11 @@ function applyLivePayload(d) {
     setText('m-hari-ini', stat.hari_ini ?? '—');
     setText('m-berisik-hari-ini', stat.berisik_hari_ini !== undefined ? `${stat.berisik_hari_ini} berisik` : '—');
     setText('m-sesi', stat.sesi_aktif ?? '—');
+
+    // Metrik Sumber Audio
+    setText('m-src-realtime', stat.total_realtime ?? (stat.sumber ? stat.sumber.realtime : '0'));
+    setText('m-src-rekam', stat.total_rekam ?? (stat.sumber ? stat.sumber.rekam : '0'));
+    setText('m-src-upload', stat.total_upload ?? (stat.sumber ? stat.sumber.upload : '0'));
   }
 
   setText('txt-last-sync', d.server_time ? d.server_time.substring(11, 19) : '');
@@ -897,12 +979,35 @@ async function muatAnalisis() {
       keyData.map(r => r.total)
     );
 
-    // Chart sumber
+    // Chart sumber & Tabel sumber
     const sumData = d.per_sumber || [];
     initChartSumber(
       sumData.map(r => r.sumber),
-      sumData.map(r => r.total)
+      sumData.map(r => r.berisik),
+      sumData.map(r => r.tenang !== undefined ? r.tenang : (r.total - r.berisik))
     );
+
+    const tbodySum = document.getElementById('tbody-analisis-sumber');
+    if (tbodySum) {
+      if (sumData.length === 0) {
+        tbodySum.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:16px;color:var(--text-sub)">Belum ada data sumber audio</td></tr>';
+      } else {
+        tbodySum.innerHTML = sumData.map(r => {
+          const tenang = r.tenang !== undefined ? r.tenang : (r.total - r.berisik);
+          const rasio = r.total ? ((r.berisik / r.total) * 100).toFixed(1) : 0;
+          return `
+            <tr>
+              <td>${formatSumberBadge(r.sumber)}</td>
+              <td><b>${r.total}</b></td>
+              <td style="color:var(--merah);font-weight:700">${r.berisik}</td>
+              <td style="color:var(--hijau);font-weight:700">${tenang}</td>
+              <td><b>${rasio}%</b></td>
+              <td>${r.avg_rms !== null && r.avg_rms !== undefined ? r.avg_rms + ' dBFS' : '—'}</td>
+            </tr>
+          `;
+        }).join('');
+      }
+    }
   } catch(e) {}
 }
 
@@ -915,12 +1020,13 @@ function debounceRiwayat() {
 
 async function muatRiwayat() {
   try {
+    const sumber = document.getElementById('f-sumber').value;
     const vonis = document.getElementById('f-vonis').value;
     const metode = document.getElementById('f-metode').value;
     const limit = document.getElementById('f-limit').value;
     const q = document.getElementById('f-query').value;
 
-    const url = `/api/riwayat?limit=${limit}&vonis=${encodeURIComponent(vonis)}&metode=${encodeURIComponent(metode)}&query=${encodeURIComponent(q)}`;
+    const url = `/api/riwayat?limit=${limit}&sumber=${encodeURIComponent(sumber)}&vonis=${encodeURIComponent(vonis)}&metode=${encodeURIComponent(metode)}&query=${encodeURIComponent(q)}`;
     const res = await fetch(url);
     if (!res.ok) return;
     const json = await res.json();
@@ -936,7 +1042,7 @@ async function muatRiwayat() {
       <tr>
         <td style="color:#64748b;font-weight:700">${r.id}</td>
         <td>${r.timestamp}</td>
-        <td>${r.sumber || '—'}</td>
+        <td>${formatSumberBadge(r.sumber)}</td>
         <td><b>${r.metode || '—'}</b></td>
         <td><span class="badge ${r.vonis === 'BERISIK' ? 'badge-berisik' : 'badge-tenang'}">${r.vonis}</span></td>
         <td>${r.p_berisik !== null && r.p_berisik !== undefined ? parseFloat(r.p_berisik).toFixed(3) : '—'}</td>

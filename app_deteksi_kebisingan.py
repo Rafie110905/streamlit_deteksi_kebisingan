@@ -681,7 +681,7 @@ with tab_uji:
                 if n_b is not None and n_p is not None:
                     entri["pohon_berisik"] = f"{n_b}/{n_p}"
                 # --- Log ke SQLite ---
-                _sumber_log = "Rekam Langsung" if sumber_audio == "Rekam langsung" else "Upload"
+                _sumber_log = "Rekam Langsung" if sumber_audio == "Rekam langsung" else "Upload Berkas"
                 log_deteksi(
                     sumber=_sumber_log, metode=model_klasifikasi,
                     vonis="BERISIK" if berisik else "TIDAK BERISIK",
@@ -716,7 +716,7 @@ with tab_uji:
                     "ambang (dBFS)": ambang_rms_dbfs,
                 }
                 # --- Log ke SQLite ---
-                _sumber_log = "Rekam Langsung" if sumber_audio == "Rekam langsung" else "Upload"
+                _sumber_log = "Rekam Langsung" if sumber_audio == "Rekam langsung" else "Upload Berkas"
                 log_deteksi(
                     sumber=_sumber_log, metode="RMS",
                     vonis="BERISIK" if berisik else "TIDAK BERISIK",
@@ -805,6 +805,12 @@ with tab_admin:
             m3.metric("Terdeteksi Berisik", f"{stat.get('berisik', 0)} ({stat.get('persen_berisik', 0)}%)")
             m4.metric("Deteksi Hari Ini", f"{stat.get('hari_ini', 0)} ({stat.get('berisik_hari_ini', 0)} bising)")
 
+            st.markdown("##### 📁 Rincian Sumber Deteksi Audio")
+            sc1, sc2, sc3 = st.columns(3)
+            sc1.metric("📡 Realtime WebRTC", stat.get("total_realtime", 0))
+            sc2.metric("🎙️ Rekam Langsung", stat.get("total_rekam", 0))
+            sc3.metric("📁 Upload Berkas", stat.get("total_upload", 0))
+
             st.markdown("#### Status Deteksi Terkini")
             terkini = ambil_status_terkini()
             if terkini:
@@ -812,7 +818,7 @@ with tab_admin:
                 st.markdown(
                     f"""
                     <div style="background:{WARNA['panel']};border-left:6px solid {warna_vonis};padding:14px 18px;border-radius:8px;margin-bottom:15px">
-                        <div style="font-size:12px;color:{WARNA['redup']}">WAKTU: {terkini['timestamp']} · SUMBER: {terkini['sumber']} · METODE: {terkini['metode']}</div>
+                        <div style="font-size:12px;color:{WARNA['redup']}">WAKTU: {terkini['timestamp']} · SUMBER: <b>{terkini['sumber']}</b> · METODE: {terkini['metode']}</div>
                         <div style="font-size:24px;font-weight:700;color:{warna_vonis};margin:4px 0">{terkini['vonis']}</div>
                         <div style="font-size:13px;color:{WARNA['teks']}">
                             Level RMS: <b>{f"{terkini['rms_dbfs']:.1f} dBFS" if terkini['rms_dbfs'] is not None else "-"}</b> |
@@ -863,16 +869,32 @@ with tab_admin:
                 else:
                     st.caption("Belum ada data metode.")
 
+            st.divider()
+            st.markdown("##### 🎙️ Distribusi & Komparasi Sumber Audio")
+            sum_data = analisis.get("per_sumber", [])
+            if sum_data:
+                df_sum = pd.DataFrame(sum_data)
+                col_name = "sumber" if "sumber" in df_sum.columns else "sumber_label"
+                df_sum_plot = df_sum.set_index(col_name)
+                cols_to_plot = [c for c in ["berisik", "tenang"] if c in df_sum_plot.columns]
+                if cols_to_plot:
+                    st.bar_chart(df_sum_plot[cols_to_plot], width="stretch")
+                st.dataframe(df_sum, width="stretch")
+            else:
+                st.caption("Belum ada data sumber audio.")
+
         with sub_riwayat:
-            f1, f2, f3 = st.columns([1, 1, 2])
+            f1, f2, f3, f4 = st.columns([1, 1, 1, 2])
             with f1:
-                f_vonis = st.selectbox("Filter Vonis", ["Semua", "BERISIK", "TIDAK BERISIK"], key="adm_f_vonis")
+                f_sumber = st.selectbox("Filter Sumber", ["Semua", "Realtime WebRTC", "Rekam Langsung", "Upload Berkas"], key="adm_f_sumber")
             with f2:
-                f_metode = st.selectbox("Filter Metode", ["Semua", "Random Forest", "KNN", "SVM", "RMS"], key="adm_f_metode")
+                f_vonis = st.selectbox("Filter Vonis", ["Semua", "BERISIK", "TIDAK BERISIK"], key="adm_f_vonis")
             with f3:
+                f_metode = st.selectbox("Filter Metode", ["Semua", "Random Forest", "KNN", "SVM", "RMS"], key="adm_f_metode")
+            with f4:
                 f_q = st.text_input("Cari file / sesi ID", placeholder="Ketik kata kunci...", key="adm_f_q")
 
-            data_riwayat = ambil_riwayat_terfilter(limit=100, vonis=f_vonis, metode=f_metode, query=f_q)
+            data_riwayat = ambil_riwayat_terfilter(limit=100, vonis=f_vonis, metode=f_metode, query=f_q, sumber=f_sumber)
             if data_riwayat:
                 df_admin = pd.DataFrame(data_riwayat)
                 st.dataframe(df_admin, width="stretch")
